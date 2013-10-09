@@ -1,3 +1,11 @@
+/**
+ * Some of the ideas and concepts are borrowed from reading code written 
+ * by Victor Zandy <zandy[at]cs.wisc.edu> for getting values of symbols
+ * from inspecting the /proc/xxx/maps virtual file and contents of
+ * refered ELF files. To better understand ELF files I felt the need to 
+ * implement my own version.
+ */
+
 #include <stdio.h>
 #include <elf.h>
 #include <unistd.h>
@@ -37,7 +45,7 @@ struct Symbol_s
 {
     const char * name;
     int cnt;
-    Elf32_Addr values[MAX_NUM_ADDRS_PER_SYM];	     /* Symbol values, to be filled in when found */
+    void * values[MAX_NUM_ADDRS_PER_SYM];	     /* Symbol values, to be filled in when found */
 };
 
 typedef struct Symbol_s Symbol_t;
@@ -209,7 +217,7 @@ static bool search_elf_symbol_section(const Elf_info_t * elf_info, int symtab_id
             continue;
         }
 
-        Elf32_Addr value;
+        void * value;
         Elf32_Shdr * shdr = NULL;
         if(pSym->st_shndx == SHN_ABS)
         {
@@ -218,7 +226,7 @@ static bool search_elf_symbol_section(const Elf_info_t * elf_info, int symtab_id
             {
                 continue;
             }
-            value = pSym->st_value;
+            value = (void *) pSym->st_value;
         }
         else if(pSym->st_shndx >= elf_info->ehdr->e_shnum)
         {
@@ -237,7 +245,7 @@ static bool search_elf_symbol_section(const Elf_info_t * elf_info, int symtab_id
             {
                 continue;
             }
-            value  = pSym->st_value + elf_info->mem_map->start_address 
+            value = (void *) pSym->st_value + elf_info->mem_map->start_address 
                                                     - shdr->sh_addr - elf_info->mem_map->offset_into_file + shdr->sh_offset;
         }
         if(symstr == NULL) 
@@ -261,7 +269,7 @@ static bool search_elf_symbol_section(const Elf_info_t * elf_info, int symtab_id
             {
                 sym_to_find->values[sym_to_find->cnt] = value;
             
-                DEBUG_MSG("%08lx => %s", (unsigned long) value, symbol_name);
+                DEBUG_MSG("%p => %s", value, symbol_name);
                 DEBUG_MSG("Mem_map => %08lx - %08lx", elf_info->mem_map->start_address, elf_info->mem_map->end_address);
                 DEBUG_MSG("offset into file => %08lx", elf_info->mem_map->offset_into_file);
                 if(shdr)

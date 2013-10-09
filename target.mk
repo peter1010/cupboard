@@ -1,3 +1,8 @@
+#
+# Thanks goes to http://make.paulandlesley.org for the ideas and concepts that 
+# I've borrowed in these makefiles
+# 
+
 .SUFFIXES:
 
 # Calculate name of build directory
