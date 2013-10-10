@@ -36,20 +36,6 @@ struct Map_entry_s
 
 typedef struct Map_entry_s Map_entry_t;
 
-#define MAX_NUM_ADDRS_PER_SYM 5
-
-/**
- * Information about the symbol we are looking for 
- */
-struct Symbol_s
-{
-    const char * name;
-    int cnt;
-    void * values[MAX_NUM_ADDRS_PER_SYM];	     /* Symbol values, to be filled in when found */
-};
-
-typedef struct Symbol_s Symbol_t;
-
 /**
  * Information collected as the Elf file associated with Map_entry is parsed
  */
@@ -419,7 +405,7 @@ const char * shtype2str(int sh_type)
  */
 static bool search_elf_sections(Elf_info_t * elf_info, Symbol_t * sym_to_find, bool print_shdr_tab)
 {
-    bool found = false;
+    bool found_max = false;
     
     /* Look through the section header table */
     int symtab_idx = -1;
@@ -468,17 +454,17 @@ static bool search_elf_sections(Elf_info_t * elf_info, Symbol_t * sym_to_find, b
     {
         if(search_elf_symbol_section(elf_info, dynSym_idx, dynSymStr_idx, sym_to_find))
         {
-            found = true;
+            found_max = true;
         }
     }
-    if((symtab_idx >= 0) && (symtabStr_idx >= 0) && !found)
+    if((symtab_idx >= 0) && (symtabStr_idx >= 0) && !found_max)
     {
         if(search_elf_symbol_section(elf_info, symtab_idx, symtabStr_idx, sym_to_find))
         {
-            found = true;
+            found_max = true;
         }
     }
-    return found;
+    return found_max;
 }
 
 /**
@@ -596,8 +582,15 @@ void free_elf_info_struct(Elf_info_t * elf_info)
     elf_info->shstrtab = NULL;
 }
 
-void init_symbol_struct(Symbol_t * sym, const char * symbol)
+void init_symbol_struct(Symbol_t * sym)
 {
+    if(sym == NULL)
+    {
+        ERROR_MSG("Null pointer for Symbol_t");
+        exit(EXIT_FAILURE);
+    }
+
+    const char * symbol = sym->name;
     memset(sym, 0, sizeof(Symbol_t));
     sym->name = symbol;
 }
@@ -608,14 +601,14 @@ void init_symbol_struct(Symbol_t * sym, const char * symbol)
  *
  * @param[in] pid The process to inspect
  * @param[in] library Optional library 
+ * @param[in,out] symbol Structure containg symbol info 
  */
-void * find_addr_of_symbol(pid_t pid, const char * library, const char * symbol)
+bool find_addr_of_symbol(pid_t pid, const char * library, Symbol_t * sym_to_find)
 {
     Elf_info_t elf_info;
     init_elf_info_struct(&elf_info);
 
-    Symbol_t sym_to_find;
-    init_symbol_struct(&sym_to_find, symbol);
+    init_symbol_struct(sym_to_find);
 
     char memory_map[50];
     snprintf(memory_map, sizeof(memory_map), "/proc/%i/maps", pid);
@@ -647,7 +640,7 @@ void * find_addr_of_symbol(pid_t pid, const char * library, const char * symbol)
             }
             elf_info.mem_map = next_map_entry;
 
-            if(find_symbol_in_elf(&elf_info, &sym_to_find))
+            if(find_symbol_in_elf(&elf_info, sym_to_find))
             {
                 break;
             }
@@ -657,11 +650,11 @@ void * find_addr_of_symbol(pid_t pid, const char * library, const char * symbol)
 
     free_elf_info_struct(&elf_info);
 
-    return sym_to_find.values[0];
+    return false;
 }
 
 
-char * find_closest_symbol(pid_t pid, const unsigned long addr)
+char * find_closest_symbol(pid_t pid, void * addr)
 {
     char * retVal = NULL;
 
@@ -675,7 +668,8 @@ char * find_closest_symbol(pid_t pid, const unsigned long addr)
         {
             Map_entry_t * map_entry = parse_map_entry(linebuf);
 
-            if((addr >= map_entry->start_address) && (addr < map_entry->end_address))
+            if(((unsigned long)addr >= map_entry->start_address) 
+                                 && ((unsigned long)addr < map_entry->end_address))
             {
 //                char * retVal = find_closet_symbol(map_entry, addr);
             }

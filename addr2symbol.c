@@ -15,7 +15,7 @@ void end()
 
 static void print_usage()
 {
-    fprintf(stderr, "Usage: [-v level] -p pid symbol_name\n");
+    fprintf(stderr, "Usage: [-v level] -p pid address\n");
 }
 
 int main(int argc, char * const argv[])
@@ -49,16 +49,9 @@ int main(int argc, char * const argv[])
         print_usage();
         return EXIT_FAILURE;
     }
+    void * addr = (void *) atoi(argv[optind]);
 
-    Symbol_t sym;
-    sym.name = argv[optind];
-
-    find_addr_of_symbol(tgt_pid, NULL, &sym);
-
-    int i;
-    for(i = 0; i < sym.cnt; i++)
-    {
-        printf("In process %i; %s = %p\n", tgt_pid, sym.name, sym.values[i]);
-    }
+    char * sym_name = find_closest_symbol(tgt_pid, addr);
+    printf("In process %i; %p is close to %s\n", tgt_pid, addr, sym_name);
     return EXIT_SUCCESS;
 }

@@ -13,6 +13,7 @@ enum Log_Level_enum
     LOG_DEBUG
 };
 
+extern void set_logging_level(int level);
 
 #define INIT_LOGGING static const char log_filename[] = __FILE__
 #define FINI_LOGGING printf("\n\n")

@@ -6,6 +6,21 @@
 
 static int log_level = LOG_WARN;
 static bool log_append_allowed = false;
+static FILE * log_out = NULL;
+
+
+void log_init()
+{
+    if(!log_out)
+    {
+        log_out = stdout;
+    }
+}
+
+void set_logging_level(int level)
+{
+    log_level = level;
+}
 
 /**
  * Logging function
@@ -20,11 +35,13 @@ void log_msg(const char * filename, int line, unsigned level, const char * fmt, 
 {
     if(level <= log_level)
     {
+        log_init();
+
         va_list ap;
         va_start(ap, fmt);
 
-        fprintf(stderr, "\n[%s:%i] ", filename, line);
-        vfprintf(stderr, fmt, ap);
+        fprintf(log_out, "\n[%s:%i] ", filename, line);
+        vfprintf(log_out, fmt, ap);
 
         va_end(ap);
         log_append_allowed = true;
@@ -42,7 +59,7 @@ void log_msg_append(const char * fmt, ...)
         va_list ap;
         va_start(ap, fmt);
 
-        vfprintf(stderr, fmt, ap);
+        vfprintf(log_out, fmt, ap);
 
         va_end(ap);
     }
