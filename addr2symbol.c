@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <string.h>
 
 #include "logging.h"
 #include "symbols.h"
@@ -49,9 +50,18 @@ int main(int argc, char * const argv[])
         print_usage();
         return EXIT_FAILURE;
     }
-    void * addr = (void *) atoi(argv[optind]);
 
-    char * sym_name = find_closest_symbol(tgt_pid, addr);
-    printf("In process %i; %p is close to %s\n", tgt_pid, addr, sym_name);
+    Address_t addr;
+    addr.value = (void *) atoi(argv[optind]);
+
+    find_closest_symbol(tgt_pid, &addr);
+
+    int i;
+    char * p = addr.names;
+    for(i = 0; i < addr.cnt; i++)
+    {
+        printf("In process %i; %p is close to %s\n", tgt_pid, addr.value, p);
+        p = &p[strlen(p)+1];
+    }
     return EXIT_SUCCESS;
 }

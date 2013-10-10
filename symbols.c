@@ -72,7 +72,6 @@ static void * xalloc(size_t size)
 /**
  * Parse an entry in the /proc/xxx/map output
  *
- * @param[out] entry Filled in with parsed info
  * @param[in] linebuf A line of text from /proc/xxx/maps
  *
  * @return Allocated memory containing the Map_entry structure
@@ -119,11 +118,14 @@ static Map_entry_t * parse_map_entry(const char * linebuf)
  */
 static bool match_library(const char * to_find, const char * poss)
 {
-    if(to_find == NULL)
-        return true;
-
     if(*poss == '\0')
+    {
         return false;
+    }
+    if(to_find == NULL)
+    {
+        return true;
+    }
 
     const char * start = strrchr(poss, '/');
     start = (start == NULL) ? poss : &start[1];
@@ -144,7 +146,7 @@ static bool match_library(const char * to_find, const char * poss)
  * @param[in] shdr A Section header from section header table
  * @parms[in] fd
  *
- * @return Section contains in a malloced memory block
+ * @return Section contents in a malloced memory block
  */
 static void * get_elf_section(const Elf32_Shdr * shdr, int fd)
 {
@@ -161,12 +163,12 @@ static void * get_elf_section(const Elf32_Shdr * shdr, int fd)
 /**
  * Search through the section looking for the symbol we are interesting
  *
- * @param[in] symtab Pointer to Symbol table section header
- * @param[in] strtab Pointer to corresponding string table header
- * @param[in,out] sym_to_find Pointer to structure conating info about symbol we are looking for
- * @param[in] fd The open file descriptor of elf file that we are searching
+ * @param[in] elf_info Structure containing Elf information (like a class this pointer)
+ * @param[in] symtab_idx Index of Symbol table section header in section header table
+ * @param[in] strtab_idx Index of String table section header in section header table
+ * @param[in,out] sym_to_find Pointer to structure containing info about symbol we are looking for
  *
- * @return True on success
+ * @return True if any found
  *
  */
 static bool search_elf_symbol_section(const Elf_info_t * elf_info, int symtab_idx, int strtab_idx, Symbol_t * sym_to_find)
@@ -241,6 +243,7 @@ static bool search_elf_symbol_section(const Elf_info_t * elf_info, int symtab_id
         DEBUG_MSG("%08lx => %s (%i) {%i}", (unsigned long) pSym->st_value, symbol_name, pSym->st_size, pSym->st_shndx);
         if(strcmp(sym_to_find->name, symbol_name) == 0)
         {
+            found = true;
             DEBUG_MSG("++++++ Matched %s ++++++ ", symbol_name);
             int i;
             for(i = 0; i < sym_to_find->cnt; i++)
@@ -265,7 +268,6 @@ static bool search_elf_symbol_section(const Elf_info_t * elf_info, int symtab_id
                 DEBUG_MSG("++++++  ++++++ ");
                 if(++sym_to_find->cnt >= MAX_NUM_ADDRS_PER_SYM)
                 {
-                    found = true;
                     break;
                 }
             }
@@ -319,6 +321,13 @@ static char * get_section_header_strings(Elf32_Shdr * shdr, int fd)
     return shstrtab;
 }
 
+/**
+ * Debug function that converts a section headr type to a string
+ *
+ * @param[in] sh_type Section header type
+ *
+ * @return Pointer to const string
+ */
 const char * shtype2str(int sh_type)
 {
     const char * retval = "UNKNOWN";
@@ -398,14 +407,14 @@ const char * shtype2str(int sh_type)
 /**
  * Look through ELF sections looking for the symbol we are interesting
  *
- * @param[in] ehdr Pointer to ELF file header
+ * @param[in] elf_info Like a this pointer contains ELF file info
  * @param[in,out] sym_to_find The symbol we are looking for
- *
- * @param[in] fd The open file descriptor of elf file that we are searching
+ * @param[in] print_shdr_table If this is the first time this table is read then print it via logging
+ *    functions
  */
-static bool search_elf_sections(Elf_info_t * elf_info, Symbol_t * sym_to_find, bool print_shdr_tab)
+static void search_elf_sections(Elf_info_t * elf_info, Symbol_t * sym_to_find, bool print_shdr_tab)
 {
-    bool found_max = false;
+    bool found_some = false;
     
     /* Look through the section header table */
     int symtab_idx = -1;
@@ -452,25 +461,19 @@ static bool search_elf_sections(Elf_info_t * elf_info, Symbol_t * sym_to_find, b
     /* Look in the Dynamic symbol table first as they never get stripped */
     if((dynSym_idx >= 0) && (dynSymStr_idx >= 0))
     {
-        if(search_elf_symbol_section(elf_info, dynSym_idx, dynSymStr_idx, sym_to_find))
-        {
-            found_max = true;
-        }
+        found_some = search_elf_symbol_section(elf_info, dynSym_idx, dynSymStr_idx, sym_to_find);
     }
-    if((symtab_idx >= 0) && (symtabStr_idx >= 0) && !found_max)
+    if((symtab_idx >= 0) && (symtabStr_idx >= 0) && !found_some)
     {
-        if(search_elf_symbol_section(elf_info, symtab_idx, symtabStr_idx, sym_to_find))
-        {
-            found_max = true;
-        }
+        search_elf_symbol_section(elf_info, symtab_idx, symtabStr_idx, sym_to_find);
     }
-    return found_max;
 }
 
 /**
  * Get the Elf header
  *
  * @param[in] fd The open file descriptor for the ELF file
+ * @param[in] pathname The name of the Elf file
  *
  * @return Allocated memory containg the elf header
  */
@@ -509,12 +512,10 @@ static Elf32_Ehdr * get_elf_header(int fd, const char * pathname)
 /**
  * Look in the elf file specificied and find the symbol we are after
  *
- * @param[in] mem_map The Memory map entry we are searching
+ * @param[in] elf_info The this pointer to structure containg elf info
  * @param[in,out] sym_to_find The symbol to find
- *
- * @return True if success
  */
-static bool find_symbol_in_elf(Elf_info_t * elf_info, Symbol_t * sym_to_find)
+static void find_symbol_in_elf(Elf_info_t * elf_info, Symbol_t * sym_to_find)
 {
     int fd = -1;
     if(elf_info->fd < 0)
@@ -550,21 +551,28 @@ static bool find_symbol_in_elf(Elf_info_t * elf_info, Symbol_t * sym_to_find)
             }
         }
     }
-
-    bool found = false;
     if(elf_info->fd >= 0)
     {
-        found = search_elf_sections(elf_info, sym_to_find, fd >= 0 ? true : false);
+        search_elf_sections(elf_info, sym_to_find, fd >= 0 ? true : false);
     }
-    return found;
 }
 
+/**
+ * Initialse the Elf_into_t structure
+ *
+ * @param[in] elf_info
+ */
 void init_elf_info_struct(Elf_info_t * elf_info)
 {
     memset(elf_info, 0, sizeof(Elf_info_t));
     elf_info->fd = -1;
 }
 
+/**
+ * Free the elf info structure
+ *
+ * @param[in] elf_info
+ */
 void free_elf_info_struct(Elf_info_t * elf_info)
 {
     if(elf_info->fd >= 0)
@@ -582,6 +590,11 @@ void free_elf_info_struct(Elf_info_t * elf_info)
     elf_info->shstrtab = NULL;
 }
 
+/**
+ * Initialise the Symbol_t structure to have no found values
+ *
+ * @param[in,out] sym The structure containg symbol name and values
+ */
 void init_symbol_struct(Symbol_t * sym)
 {
     if(sym == NULL)
@@ -596,6 +609,25 @@ void init_symbol_struct(Symbol_t * sym)
 }
 
 /**
+ * Initialise the Address_t structure to have no found values
+ *
+ * @param[in,out] addr The structure containg symbol name and values
+ */
+void init_address_struct(Address_t * addr)
+{
+    if(addr == NULL)
+    {
+        ERROR_MSG("Null pointer for Address_t");
+        exit(EXIT_FAILURE);
+    }
+
+    void * addr_ = addr->value;
+    memset(addr, 0, sizeof(Address_t));
+    addr->value = addr_;
+}
+
+
+/**
  * Find the symbol in the process by looking up in the ELF files that
  * make up the process memory map space
  *
@@ -603,7 +635,7 @@ void init_symbol_struct(Symbol_t * sym)
  * @param[in] library Optional library 
  * @param[in,out] symbol Structure containg symbol info 
  */
-bool find_addr_of_symbol(pid_t pid, const char * library, Symbol_t * sym_to_find)
+void find_addr_of_symbol(pid_t pid, const char * library, Symbol_t * sym_to_find)
 {
     Elf_info_t elf_info;
     init_elf_info_struct(&elf_info);
@@ -639,24 +671,23 @@ bool find_addr_of_symbol(pid_t pid, const char * library, Symbol_t * sym_to_find
                 }
             }
             elf_info.mem_map = next_map_entry;
-
-            if(find_symbol_in_elf(&elf_info, sym_to_find))
-            {
-                break;
-            }
+            find_symbol_in_elf(&elf_info, sym_to_find);
         }
         fclose(mem_fp);
     }
-
     free_elf_info_struct(&elf_info);
-
-    return false;
 }
 
-
-char * find_closest_symbol(pid_t pid, void * addr)
+static void find_closest_symbol_in_elf(Elf_info_t * elf_info, Address_t * addr_to_find)
 {
-    char * retVal = NULL;
+}
+
+void find_closest_symbol(pid_t pid, Address_t * addr_to_find)
+{
+    Elf_info_t elf_info;
+    init_elf_info_struct(&elf_info);
+    
+    init_address_struct(addr_to_find);
 
     char memory_map[50];
     snprintf(memory_map, sizeof(memory_map), "/proc/%i/maps", pid);
@@ -666,17 +697,31 @@ char * find_closest_symbol(pid_t pid, void * addr)
         char linebuf[256];
         while(fgets(linebuf, sizeof(linebuf), mem_fp) != NULL)
         {
-            Map_entry_t * map_entry = parse_map_entry(linebuf);
+            Map_entry_t * next_map_entry = parse_map_entry(linebuf);
 
-            if(((unsigned long)addr >= map_entry->start_address) 
-                                 && ((unsigned long)addr < map_entry->end_address))
+            if(((unsigned long)addr_to_find->value < next_map_entry->start_address) 
+                                 || ((unsigned long)addr_to_find->value >= next_map_entry->end_address))
             {
-//                char * retVal = find_closet_symbol(map_entry, addr);
+                free(next_map_entry);
+                continue;
             }
-            free(map_entry);
+            if(elf_info.mem_map)     /* Is there a previous map_entry? */
+            {
+                /* But it's a different ELF file */
+                if(strcmp(elf_info.mem_map->pathname, next_map_entry->pathname) != 0)
+                {
+                    free_elf_info_struct(&elf_info);
+                }
+                else
+                {
+                    free(elf_info.mem_map); 
+                    elf_info.mem_map = NULL;
+                }
+            }
+            elf_info.mem_map = next_map_entry;
+            find_closest_symbol_in_elf(&elf_info, addr_to_find);
         }
         fclose(mem_fp);
     }
-
-    return retVal;
+    free_elf_info_struct(&elf_info);
 }

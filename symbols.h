@@ -20,12 +20,20 @@ struct Symbol_s
 
 typedef struct Symbol_s Symbol_t;
 
-/**
- * Return true if more matches that MAX_NUM_ADDRS_PER_SYM
- */
-bool find_addr_of_symbol(pid_t pid, const char * library, Symbol_t * symbol);
+void find_addr_of_symbol(pid_t pid, const char * library, Symbol_t * symbol);
 
 
-char * find_closest_symbol(pid_t pid, void * addr);
+#define MAX_NUM_SYMS_PER_ADDR 5
+
+struct Address_s
+{
+    void * value;
+    int cnt;                                  /* Number found */
+    char names[MAX_NUM_SYMS_PER_ADDR*100];    /* Symbol values, to be filled in when found */
+};
+
+typedef struct Address_s Address_t;
+
+void find_closest_symbol(pid_t pid, Address_t * addr);
 
 #endif
