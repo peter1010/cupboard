@@ -13,7 +13,10 @@
  */
 struct Symbol_s
 {
+    /* IN */
     const char * name;
+
+    /* OUT */
     int cnt;                                 /* Number found */
     void * values[MAX_NUM_ADDRS_PER_SYM];    /* Symbol values, to be filled in when found */
 };
@@ -22,14 +25,16 @@ typedef struct Symbol_s Symbol_t;
 
 void find_addr_of_symbol(pid_t pid, const char * library, Symbol_t * symbol);
 
-
-#define MAX_NUM_SYMS_PER_ADDR 5
+#define MAX_SYMBOL_NAME_LEN   (256)
 
 struct Address_s
 {
-    void * value;
-    int cnt;                                  /* Number found */
-    char names[MAX_NUM_SYMS_PER_ADDR*100];    /* Symbol values, to be filled in when found */
+    /* IN */
+    void * value;                             /* The Address to search for */
+
+    /* OUT */
+    int distance;
+    char name[MAX_SYMBOL_NAME_LEN];           /* Symbol name, to be filled in when found */
 };
 
 typedef struct Address_s Address_t;

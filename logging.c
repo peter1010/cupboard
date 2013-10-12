@@ -65,3 +65,10 @@ void log_msg_append(const char * fmt, ...)
     }
 }
 
+void log_fini()
+{
+    if(log_out)
+    {
+        fprintf(log_out, "\n");
+    }
+}

@@ -55,6 +55,8 @@ int main(int argc, char * const argv[])
 
     find_addr_of_symbol(tgt_pid, NULL, &sym);
 
+    FINI_LOGGING;
+
     int i;
     for(i = 0; i < sym.cnt; i++)
     {

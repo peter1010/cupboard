@@ -52,16 +52,15 @@ int main(int argc, char * const argv[])
     }
 
     Address_t addr;
-    addr.value = (void *) atoi(argv[optind]);
-
+    char * endp;
+    addr.value = (void *) strtoul(argv[optind], &endp, 0);
+    if(*endp != '\0')
+    {
+        print_usage();
+    }
     find_closest_symbol(tgt_pid, &addr);
 
-    int i;
-    char * p = addr.names;
-    for(i = 0; i < addr.cnt; i++)
-    {
-        printf("In process %i; %p is close to %s\n", tgt_pid, addr.value, p);
-        p = &p[strlen(p)+1];
-    }
+    FINI_LOGGING;
+    printf("In process %i; %p is close to %s [+%i]\n", tgt_pid, addr.value, addr.name, addr.distance);
     return EXIT_SUCCESS;
 }
