@@ -4,6 +4,8 @@
 #include <stdlib.h>    /* Defines pid_t */
 #include <stdbool.h>   /* Defines bool */
 
+typedef unsigned char * MemPtr_t;
+
 #define MAX_NUM_ADDRS_PER_SYM 5
 
 /**
@@ -18,7 +20,7 @@ struct Symbol_s
 
     /* OUT */
     int cnt;                                 /* Number found */
-    void * values[MAX_NUM_ADDRS_PER_SYM];    /* Symbol values, to be filled in when found */
+    MemPtr_t values[MAX_NUM_ADDRS_PER_SYM];    /* Symbol values, to be filled in when found */
 };
 
 typedef struct Symbol_s Symbol_t;
@@ -30,7 +32,7 @@ void find_addr_of_symbol(pid_t pid, const char * library, Symbol_t * symbol);
 struct Address_s
 {
     /* IN */
-    void * value;                             /* The Address to search for */
+    MemPtr_t value;                           /* The Address to search for */
 
     /* OUT */
     int distance;

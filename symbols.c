@@ -26,8 +26,8 @@ INIT_LOGGING;
  */
 struct Map_entry_s
 {
-    void * start_address;
-    void * end_address;
+    MemPtr_t start_address;
+    MemPtr_t end_address;
     int permissions;                  /* r/w/x/p */
     unsigned long offset_into_file;   /* if region mapped from file, the offset into file */
     unsigned short dev_major;         /* if region mapped from file, the major/minor dev where file lives */
@@ -104,8 +104,8 @@ static Map_entry_t * parse_map_entry(const char * linebuf)
         exit(1);
     }
   
-    entry->start_address = (void *) start_address;
-    entry->end_address = (void *) end_address;
+    entry->start_address = (MemPtr_t) start_address;
+    entry->end_address = (MemPtr_t) end_address;
     entry->permissions = 0;
 
     char * p = permissions;
@@ -229,7 +229,7 @@ static Elf32_Sym * get_symbol_table(const Elf_info_t * elf_info, int symtab_idx,
  *
  * @return true if value has been found
  */
-static bool get_symbol_value(const Elf_info_t * elf_info, const Elf32_Sym * pSym, void ** pValue)
+static bool get_symbol_value(const Elf_info_t * elf_info, const Elf32_Sym * pSym, MemPtr_t * pValue)
 {
     /* Not interested in symbols that are not data or code */
     switch(ELF32_ST_TYPE(pSym->st_info))
@@ -258,10 +258,10 @@ static bool get_symbol_value(const Elf_info_t * elf_info, const Elf32_Sym * pSym
         return false;
     }
 
-    void * value;
+    MemPtr_t value;
     if(pSym->st_shndx == SHN_ABS)
     {
-        value = (void *) pSym->st_value;
+        value = (MemPtr_t) pSym->st_value;
         /* Is this is not mapped into the memory map entry we are searching */
         if((value >= elf_info->mem_map->end_address) || (value < elf_info->mem_map->start_address))
         {
@@ -285,7 +285,7 @@ static bool get_symbol_value(const Elf_info_t * elf_info, const Elf32_Sym * pSym
         {
             return false;
         }
-        value = (void *) pSym->st_value + (unsigned long) elf_info->mem_map->start_address 
+        value = (MemPtr_t) pSym->st_value + (unsigned long) elf_info->mem_map->start_address 
                                                     - shdr->sh_addr - elf_info->mem_map->offset_into_file + shdr->sh_offset;
 //        DEBUG_MSG("ELF Shdr, %08lx %08lx-%08lx", (unsigned long) shdr->sh_addr,
 //                                                 (unsigned long) shdr->sh_offset, 
@@ -322,7 +322,7 @@ static bool search_elf_symbol_section_for_sym(const Elf_info_t * elf_info, int s
     Elf32_Sym * pSym = &symbols[0];
     for(; pSym < &symbols[num_of_symbols]; pSym++)
     {
-        void * value;
+        MemPtr_t value;
         if(!get_symbol_value(elf_info, pSym, &value))
         {
             continue;
@@ -393,10 +393,10 @@ static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int 
 
     Elf32_Sym * pSym = &symbols[0];
     Elf32_Sym * pBestSym = NULL;
-    void * bestValue = NULL;
+    MemPtr_t bestValue = NULL;
     for(; pSym < &symbols[num_of_symbols]; pSym++)
     {
-        void * value;
+        MemPtr_t value;
         if(!get_symbol_value(elf_info, pSym, &value))
         {
             continue;
@@ -845,7 +845,7 @@ void init_address_struct(Address_t * addr)
         exit(EXIT_FAILURE);
     }
 
-    void * addr_ = addr->value;
+    MemPtr_t addr_ = addr->value;
     memset(addr, 0, sizeof(Address_t));
     addr->value = addr_;
     addr->distance = INT_MAX;
