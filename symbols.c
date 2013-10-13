@@ -14,6 +14,7 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <limits.h>
+#include <sys/mman.h>
 
 #include "symbols.h"
 #include "logging.h"
@@ -27,7 +28,7 @@ struct Map_entry_s
 {
     void * start_address;
     void * end_address;
-    char permissions[5];              /* r/w/x/p */
+    int permissions;                  /* r/w/x/p */
     unsigned long offset_into_file;   /* if region mapped from file, the offset into file */
     unsigned short dev_major;         /* if region mapped from file, the major/minor dev where file lives */
     unsigned short dev_minor;         
@@ -81,12 +82,13 @@ static Map_entry_t * parse_map_entry(const char * linebuf)
 {
     Map_entry_t * entry = xalloc(sizeof(Map_entry_t));
 
-    unsigned long start_address;
-    unsigned long end_address;
+    unsigned long start_address = 0;
+    unsigned long end_address = 0;
+    char permissions[10] = {0};
     const int num_parsed = sscanf(linebuf, "%lx-%lx %5s %lx %hu:%hu %lu %256s",
 			                   &start_address, 
                                            &end_address, 
-                                           &entry->permissions[0],
+                                           &permissions[0],
                                            &entry->offset_into_file,
                                            &entry->dev_major,
                                            &entry->dev_minor,
@@ -104,10 +106,39 @@ static Map_entry_t * parse_map_entry(const char * linebuf)
   
     entry->start_address = (void *) start_address;
     entry->end_address = (void *) end_address;
+    entry->permissions = 0;
+
+    char * p = permissions;
+    for(; *p; p++)
+    {
+        switch(*p)
+        {
+            case 'r':
+                entry->permissions |= PROT_READ;
+                break;
+
+            case 'w':
+                entry->permissions |= PROT_WRITE;
+                break;
+
+            case 'x':
+                entry->permissions |= PROT_EXEC;
+                break;
+
+            case '-':
+            case 'p':
+                break;
+
+            default:
+                ERROR_MSG("Invalid character '%c' found in memory map entry", *p);
+                exit(EXIT_FAILURE);
+                break;
+        }
+    }
     DEBUG_MSG("%8p-%8p %s %08lx %s", 
 			     entry->start_address, 
                              entry->end_address, 
-                             entry->permissions,
+                             permissions,
                              entry->offset_into_file,
                              entry->pathname);
     return entry;
@@ -201,10 +232,24 @@ static Elf32_Sym * get_symbol_table(const Elf_info_t * elf_info, int symtab_idx,
 static bool get_symbol_value(const Elf_info_t * elf_info, const Elf32_Sym * pSym, void ** pValue)
 {
     /* Not interested in symbols that are not data or code */
-    unsigned int _typ = ELF32_ST_TYPE(pSym->st_info);
-    if((_typ != STT_FUNC) && (_typ != STT_OBJECT))
+    switch(ELF32_ST_TYPE(pSym->st_info))
     {
-        return false;
+        case STT_FUNC:
+            if((elf_info->mem_map->permissions & PROT_EXEC) == 0)
+            {
+                return false;
+            }
+            break;
+
+        case STT_OBJECT:
+            if((elf_info->mem_map->permissions & (PROT_WRITE | PROT_READ)) == 0)
+            {
+                return false;
+            }
+            break;
+
+        default:
+            return false;
     }
 
     /* Not interested in symbols that are undefined */
@@ -836,7 +881,7 @@ void find_addr_of_symbol(pid_t pid, const char * library, Symbol_t * sym_to_find
         {
             Map_entry_t * next_map_entry = parse_map_entry(linebuf);
 
-            if(!match_library(library, next_map_entry->pathname))
+            if((next_map_entry->permissions == 0) || !match_library(library, next_map_entry->pathname))
             {
                 free(next_map_entry);
                 continue;
@@ -886,7 +931,8 @@ void find_closest_symbol(pid_t pid, Address_t * addr_to_find)
         {
             Map_entry_t * next_map_entry = parse_map_entry(linebuf);
 
-            if((addr_to_find->value < next_map_entry->start_address) 
+            if((next_map_entry->permissions == 0) ||
+                    (addr_to_find->value < next_map_entry->start_address) 
                                  || (addr_to_find->value >= next_map_entry->end_address))
             {
                 free(next_map_entry);
