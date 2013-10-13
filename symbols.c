@@ -165,6 +165,15 @@ static void * get_elf_section(const Elf32_Shdr * shdr, int fd)
     return section;
 }
 
+/**
+ * Get the symbol table
+ *
+ * @param[in] elf_info Details about the Elf file
+ * @param[in] symtab_idx The index in the Section header table of symbol table in question
+ * @param[out] pNum_of_symbols The number of symbols found
+ *
+ * @return Allocated memory containing the symbols
+ */
 static Elf32_Sym * get_symbol_table(const Elf_info_t * elf_info, int symtab_idx, int * pNum_of_symbols)
 {
     Elf32_Shdr * symtab = &elf_info->shdr[symtab_idx];
@@ -180,7 +189,16 @@ static Elf32_Sym * get_symbol_table(const Elf_info_t * elf_info, int symtab_idx,
     return (Elf32_Sym *) get_elf_section(symtab, elf_info->fd);
 }
 
-static bool get_symbol_value(const Elf32_Sym * pSym, void ** pValue, const Elf_info_t * elf_info)
+/**
+ * Get the Value of the symbol 
+ *
+ * @param[in] elf_info Elf file info
+ * @param[in] pSym Pointer to the symbol in the symbol section
+ * @param[out] pValue Place to put the value
+ *
+ * @return true if value has been found
+ */
+static bool get_symbol_value(const Elf_info_t * elf_info, const Elf32_Sym * pSym, void ** pValue)
 {
     /* Not interested in symbols that are not data or code */
     unsigned int _typ = ELF32_ST_TYPE(pSym->st_info);
@@ -260,7 +278,7 @@ static bool search_elf_symbol_section_for_sym(const Elf_info_t * elf_info, int s
     for(; pSym < &symbols[num_of_symbols]; pSym++)
     {
         void * value;
-        if(!get_symbol_value(pSym, &value, elf_info))
+        if(!get_symbol_value(elf_info, pSym, &value))
         {
             continue;
         }
@@ -304,6 +322,17 @@ static bool search_elf_symbol_section_for_sym(const Elf_info_t * elf_info, int s
     return found;
 }
 
+/**
+ * Search through the section looking for the symbol we are interesting
+ *
+ * @param[in] elf_info Structure containing Elf information (like a class this pointer)
+ * @param[in] symtab_idx Index of Symbol table section header in section header table
+ * @param[in] strtab_idx Index of String table section header in section header table
+ * @param[in,out] addr_to_find Pointer to structure containing info about address we are looking for
+ *
+ * @return True if any found
+ *
+ */
 static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int symtab_idx, int strtab_idx, Address_t * addr_to_find)
 {
     int distance = addr_to_find->distance;
@@ -323,7 +352,7 @@ static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int 
     for(; pSym < &symbols[num_of_symbols]; pSym++)
     {
         void * value;
-        if(!get_symbol_value(pSym, &value, elf_info))
+        if(!get_symbol_value(elf_info, pSym, &value))
         {
             continue;
         }
@@ -369,7 +398,7 @@ static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int 
  *
  * @return ELF section header table
  */
-static Elf32_Shdr * get_elf_section_header_table(Elf32_Ehdr * ehdr, int fd)
+static Elf32_Shdr * get_elf_section_header_table(const Elf32_Ehdr * ehdr, int fd)
 {
     size_t size = ehdr->e_shentsize * ehdr->e_shnum;
     Elf32_Shdr * shdr = (Elf32_Shdr *) xalloc(size);
@@ -391,7 +420,7 @@ static Elf32_Shdr * get_elf_section_header_table(Elf32_Ehdr * ehdr, int fd)
  * @return Allocated memory that contains the strings
  */
 
-static char * get_section_header_strings(Elf32_Shdr * shdr, int fd)
+static char * get_section_header_strings(const Elf32_Shdr * shdr, int fd)
 {
 //    assert((shdr->sh_flags & SHF_STRINGS) != 0);
     size_t size = shdr->sh_size;
@@ -488,7 +517,15 @@ const char * shtype2str(int sh_type)
     return retval;
 }
 
-static void get_symbol_table_sections(Elf_info_t * elf_info, bool print_shdr_tab, int * symtab_idx, int * dynSym_idx)
+/**
+ * Get the indexes of symbol table and string tables in the section header table
+ *
+ * @param[in] elf_info Structure containing Elf information (like a class this pointer)
+ * @param[in] print_shdr_tab Print the section header info
+ * @param[out] symtab_idx[2] Index of Symbol tablei/ strings section header in section header table
+ * @param[out] dynSym_idx[2]_idx Index of String table/ strings section header in section header table
+ */
+static void get_symbol_table_sections(const Elf_info_t * elf_info, bool print_shdr_tab, int * symtab_idx, int * dynSym_idx)
 {
     /* Look through the section header table */
     int idx = 0;
@@ -537,7 +574,7 @@ static void get_symbol_table_sections(Elf_info_t * elf_info, bool print_shdr_tab
  * @param[in] print_shdr_table If this is the first time this table is read then print it via logging
  *    functions
  */
-static void search_elf_sections_for_symbol(Elf_info_t * elf_info, Symbol_t * sym_to_find, bool print_shdr_tab)
+static void search_elf_sections_for_symbol(const Elf_info_t * elf_info, Symbol_t * sym_to_find, bool print_shdr_tab)
 {
     bool found_some = false;
     
@@ -558,7 +595,15 @@ static void search_elf_sections_for_symbol(Elf_info_t * elf_info, Symbol_t * sym
     }
 }
 
-static void search_elf_sections_for_address(Elf_info_t * elf_info, Address_t * addr_to_find, bool print_shdr_tab)
+/**
+ * Look through ELF sections looking for the address we are interesting
+ *
+ * @param[in] elf_info Like a this pointer contains ELF file info
+ * @param[in,out] sym_to_find The symbol we are looking for
+ * @param[in] print_shdr_table If this is the first time this table is read then print it via logging
+ *    functions
+ */
+static void search_elf_sections_for_address(const Elf_info_t * elf_info, Address_t * addr_to_find, bool print_shdr_tab)
 {
     /* Look through the section header table */
     int symtab_idx[2] = {-1,-1};
@@ -617,6 +662,11 @@ static Elf32_Ehdr * get_elf_header(int fd, const char * pathname)
     return ehdr;
 }
 
+/**
+ * Open the ELF file and fill in some details into the elf_info struct
+ *
+ * @param[in,out] elf_info Like a this pointer contains ELF file info
+ */
 static void open_elf_file(Elf_info_t * elf_info)
 {
     int fd = open(elf_info->mem_map->pathname, O_RDONLY);
