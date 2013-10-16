@@ -2,7 +2,6 @@
 #define _SYMBOLS_H_
 
 #include <stdlib.h>    /* Defines pid_t */
-#include <stdbool.h>   /* Defines bool */
 
 typedef unsigned char * MemPtr_t;
 
@@ -13,7 +12,7 @@ typedef unsigned char * MemPtr_t;
  * When calling only name is required. On return
  * cnt and values will be filled in
  */
-struct Symbol_s
+struct Sym2Addr_s
 {
     /* IN */
     const char * name;
@@ -23,13 +22,13 @@ struct Symbol_s
     MemPtr_t values[MAX_NUM_ADDRS_PER_SYM];    /* Symbol values, to be filled in when found */
 };
 
-typedef struct Symbol_s Symbol_t;
+typedef struct Sym2Addr_s Sym2Addr_t;
 
-void find_addr_of_symbol(pid_t pid, const char * library, Symbol_t * symbol);
+void find_addr_of_symbol(pid_t pid, const char * library, Sym2Addr_t * symbol);
 
 #define MAX_SYMBOL_NAME_LEN   (256)
 
-struct Address_s
+struct Addr2Sym_s
 {
     /* IN */
     MemPtr_t value;                           /* The Address to search for */
@@ -39,8 +38,8 @@ struct Address_s
     char name[MAX_SYMBOL_NAME_LEN];           /* Symbol name, to be filled in when found */
 };
 
-typedef struct Address_s Address_t;
+typedef struct Addr2Sym_s Addr2Sym_t;
 
-void find_closest_symbol(pid_t pid, Address_t * addr);
+void find_closest_symbol(pid_t pid, Addr2Sym_t * addr);
 
 #endif

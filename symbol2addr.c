@@ -50,7 +50,7 @@ int main(int argc, char * const argv[])
         return EXIT_FAILURE;
     }
 
-    Symbol_t sym;
+    Sym2Addr_t sym;
     sym.name = argv[optind];
 
     find_addr_of_symbol(tgt_pid, NULL, &sym);

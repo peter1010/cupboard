@@ -182,11 +182,25 @@ static bool match_library(const char * to_find, const char * poss)
     return success;
 }
 
+/**
+ * Test if the ELF info is for a 32bit Elf file
+ *
+ * @paran[in] elf_info The Elf info data
+ *
+ * @return true if 32bit ELF
+ */
 static bool is_elf_32bit(const Elf_info_t * elf_info)
 {
     return (elf_info->e_shentsize == sizeof(Elf32_Shdr)) ? true : false;
 }
 
+/**
+ * Test if the ELF info is for a 64bit Elf file
+ *
+ * @paran[in] elf_info The Elf info data
+ *
+ * @return true if 64bit ELF
+ */
 static bool is_elf_64bit(const Elf_info_t * elf_info)
 {
     return (elf_info->e_shentsize == sizeof(Elf64_Shdr)) ? true : false;
@@ -196,8 +210,8 @@ static bool is_elf_64bit(const Elf_info_t * elf_info)
 /**
  * Get contents of elf section
  *
- * @param[in] shdr A Section header from section header table
- * @parms[in] fd
+ * @paran[in] elf_info The Elf info data
+ * @param[in] shndx The index in section header of the section to get
  *
  * @return Section contents in a malloced memory block
  */
@@ -208,16 +222,14 @@ static void * get_elf_section(const Elf_info_t * elf_info, int shndx)
 
     if(is_elf_32bit(elf_info))
     {
-        Elf32_Shdr * shdr = elf_info->shdr;
-        shdr = &shdr[shndx];
+        const Elf32_Shdr * shdr = &((const Elf32_Shdr *)elf_info->shdr)[shndx];
 
         size = shdr->sh_size;
         offset = shdr->sh_offset;
     }
     else
     {
-        Elf64_Shdr * shdr = elf_info->shdr;
-        shdr = &shdr[shndx];
+        const Elf64_Shdr * shdr = &((const Elf64_Shdr *)elf_info->shdr)[shndx];
 
         size = shdr->sh_size;
         offset = shdr->sh_offset;
@@ -234,13 +246,12 @@ static void * get_elf_section(const Elf_info_t * elf_info, int shndx)
 }
 
 /**
- * Get the symbol table
+ * Get the number of symbols in symbol table
  *
  * @param[in] elf_info Details about the Elf file
  * @param[in] symtab_idx The index in the Section header table of symbol table in question
- * @param[out] pNum_of_symbols The number of symbols found
  *
- * @return Allocated memory containing the symbols
+ * @return The number of symbols
  */
 static int get_number_of_symbols(const Elf_info_t * elf_info, int symtab_idx)
 {
@@ -248,16 +259,16 @@ static int get_number_of_symbols(const Elf_info_t * elf_info, int symtab_idx)
     unsigned ele_size = 0;
     if(is_elf_32bit(elf_info))
     {
-        Elf32_Shdr * symtab = elf_info->shdr;
-        size = symtab[symtab_idx].sh_size;
-        ele_size = symtab[symtab_idx].sh_entsize;
+        const Elf32_Shdr * symtab = &((const Elf32_Shdr *)elf_info->shdr)[symtab_idx];
+        size = symtab->sh_size;
+        ele_size = symtab->sh_entsize;
         assert(sizeof(Elf32_Sym) == ele_size);
     }
     else
     {
-        Elf64_Shdr * symtab = elf_info->shdr;
-        size = symtab[symtab_idx].sh_size;
-        ele_size = symtab[symtab_idx].sh_entsize;
+        const Elf64_Shdr * symtab = &((const Elf64_Shdr *)elf_info->shdr)[symtab_idx];
+        size = symtab->sh_size;
+        ele_size = symtab->sh_entsize;
         assert(sizeof(Elf32_Sym) == ele_size);
     }
     int num_of_symbols = size / ele_size;
@@ -265,82 +276,130 @@ static int get_number_of_symbols(const Elf_info_t * elf_info, int symtab_idx)
     return num_of_symbols;
 }
 
+/**
+ * Get the section offset value for the section sprcified by the
+ * index
+ *
+ * @param[in] elf_info The Elf info data
+ * @param[in] shndx The index in section header of the section to get
+ *
+ * @return the offset
+ */
 static unsigned get_section_offset(const Elf_info_t * elf_info, int shndx)
 {
     unsigned offset = 0;
     if(is_elf_32bit(elf_info))
     {
-        Elf32_Shdr * shdr = elf_info->shdr;
-        offset = shdr[shndx].sh_offset;
+        const Elf32_Shdr * shdr = &((const Elf32_Shdr *)elf_info->shdr)[shndx];
+        offset = shdr->sh_offset;
     }
     else
     {
-        Elf64_Shdr * shdr = elf_info->shdr;
-        offset = shdr[shndx].sh_offset;
+        const Elf64_Shdr * shdr = &((const Elf64_Shdr *)elf_info->shdr)[shndx];
+        offset = shdr->sh_offset;
     }
     return offset;
 }
 
+/**
+ * Get the section address value for the section sprcified by the
+ * index
+ *
+ * @param[in] elf_info The Elf info data
+ * @param[in] shndx The index in section header of the section to get
+ *
+ * @return the address
+ */
 static unsigned get_section_address(const Elf_info_t * elf_info, int shndx)
 {
     unsigned address = 0;
     if(is_elf_32bit(elf_info))
     {
-        Elf32_Shdr * shdr = elf_info->shdr;
-        address = shdr[shndx].sh_addr;
+        const Elf32_Shdr * shdr = &((const Elf32_Shdr *)elf_info->shdr)[shndx];
+        address = shdr->sh_addr;
     }
     else
     {
-        Elf64_Shdr * shdr = elf_info->shdr;
-        address = shdr[shndx].sh_addr;
+        const Elf64_Shdr * shdr = &((const Elf64_Shdr *)elf_info->shdr)[shndx];
+        address = shdr->sh_addr;
     }
     return address;
 }
 
-static unsigned get_symbol_type(const Elf_info_t * elf_info, void * symbols, int idx)
+/**
+ * Get the symbol type value for the symbol specified by the
+ * index
+ *
+ * @param[in] elf_info The Elf info data
+ * @param[in] symbols Pointer to section containing the symbols
+ * @param[in] idx The index in section header of the section to get
+ *
+ * @return the type
+ */
+static unsigned get_symbol_type(const Elf_info_t * elf_info, const void * symbols, int idx)
 {
     unsigned _typ = 0;
     if(is_elf_32bit(elf_info))
     {
-        Elf32_Sym * pSym = symbols;
-        _typ = ELF32_ST_TYPE(pSym[idx].st_info);
+        const Elf32_Sym * pSym = &((const Elf32_Sym *)symbols)[idx];
+        _typ = ELF32_ST_TYPE(pSym->st_info);
     }
     else
     {
-        Elf64_Sym * pSym = symbols;
-        _typ = ELF64_ST_TYPE(pSym[idx].st_info);
+        const Elf64_Sym * pSym = &((const Elf64_Sym *)symbols)[idx];
+        _typ = ELF64_ST_TYPE(pSym->st_info);
     }
     return _typ;
 }
 
-static unsigned get_symbol_section(const Elf_info_t * elf_info, void * symbols, int idx)
+/**
+ * Get the symbol section value for the symbol specified by the
+ * index
+ *
+ * @param[in] elf_info The Elf info data
+ * @param[in] symbols Pointer to section containing the symbols
+ * @param[in] idx The index in section header of the section to get
+ *
+ * @return the section index
+ */
+static unsigned get_symbol_section(const Elf_info_t * elf_info, const void * symbols, int idx)
 {
     unsigned shndx = 0;
     if(is_elf_32bit(elf_info))
     {
-        Elf32_Sym * pSym = symbols;
-        shndx = pSym[idx].st_shndx;
+        const Elf32_Sym * pSym = &((const Elf32_Sym *)symbols)[idx];
+        shndx = pSym->st_shndx;
     }
     else
     {
-        Elf64_Sym * pSym = symbols;
-        shndx = pSym[idx].st_shndx;
+        const Elf64_Sym * pSym = &((const Elf64_Sym *)symbols)[idx];
+        shndx = pSym->st_shndx;
     }
     return shndx;
 }
 
-static MemPtr_t get_raw_symbol_value(const Elf_info_t * elf_info, void * symbols, int idx)
+/**
+ * Get the symbol value for the symbol specified by the
+ * index
+ *
+ * @param[in] elf_info The Elf info data
+ * @param[in] symbols Pointer to section containing the symbols
+ * @param[in] idx The index in section header of the section to get
+ *
+ * @return the section index
+ */
+static MemPtr_t get_raw_symbol_value(const Elf_info_t * elf_info, const void * symbols, int idx)
 {
     MemPtr_t value = 0;
     if(is_elf_32bit(elf_info))
     {
-        Elf32_Sym * pSym = symbols;
-        value = (MemPtr_t) (pSym[idx].st_value);
+        const Elf32_Sym * pSym = &((const Elf32_Sym *)symbols)[idx];
+        value = (MemPtr_t) (pSym->st_value);
     }
     else
     {
-        Elf64_Sym * pSym = symbols;
-        value = (MemPtr_t) (pSym[idx].st_value);
+        const Elf64_Sym * pSym = &((const Elf64_Sym *)symbols)[idx];
+        value = (MemPtr_t) (pSym->st_value);
     }
     return value;
 }
@@ -350,12 +409,13 @@ static MemPtr_t get_raw_symbol_value(const Elf_info_t * elf_info, void * symbols
  * Get the Value of the symbol 
  *
  * @param[in] elf_info Elf file info
- * @param[in] pSym Pointer to the symbol in the symbol section
+ * @param[in] symbols Pointer to section containing the symbols
+ * @param[in] idx The index in section header of the section to get
  * @param[out] pValue Place to put the value
  *
  * @return true if value has been found
  */
-static bool get_symbol_value(const Elf_info_t * elf_info, void * symbols, int idx, MemPtr_t * pValue)
+static bool get_symbol_value(const Elf_info_t * elf_info, const void * symbols, int idx, MemPtr_t * pValue)
 {
 
     /* Not interested in symbols that are not data or code */
@@ -427,24 +487,30 @@ static bool get_symbol_value(const Elf_info_t * elf_info, void * symbols, int id
     return true;
 }
 
-static char * get_symbol_name(const Elf_info_t * elf_info, int strtab_idx, void * symbols, int idx, char ** symstr)
+/**
+ * Get the name of the symbol 
+ *
+ * @param[in] elf_info Elf file info
+ * @param[in] symbols Pointer to section containing the symbols
+ * @param[in] idx The index in section header of the section to get
+ * @param[in] symstr The string table
+ *
+ * @return The symbol name
+ */
+const static char * get_symbol_name(const Elf_info_t * elf_info, const void * symbols, int idx, const char * symstr)
 {
     int name_idx = 0;
     if(is_elf_32bit(elf_info))
     {
-        Elf32_Sym * pSym = symbols;
-        name_idx = pSym[idx].st_name;
+        const Elf32_Sym * pSym = &((const Elf32_Sym *)symbols)[idx];
+        name_idx = pSym->st_name;
     }
     else
     {
-        Elf64_Sym * pSym = symbols;
-        name_idx = pSym[idx].st_name;
+        const Elf64_Sym * pSym = &((const Elf64_Sym *)symbols)[idx];
+        name_idx = pSym->st_name;
     }
-    if(*symstr == NULL)
-    {
-        *symstr = (char *) get_elf_section(elf_info, strtab_idx);
-    }
-    return &(*symstr)[name_idx];
+    return &(symstr[name_idx]);
 }
 
 /**
@@ -458,7 +524,7 @@ static char * get_symbol_name(const Elf_info_t * elf_info, int strtab_idx, void 
  * @return True if any found
  *
  */
-static bool search_elf_symbol_section_for_sym(const Elf_info_t * elf_info, int symtab_idx, int strtab_idx, Symbol_t * sym_to_find)
+static bool search_elf_symbol_section_for_sym(const Elf_info_t * elf_info, int symtab_idx, int strtab_idx, Sym2Addr_t * sym_to_find)
 {
     bool found = false;
     int num_of_symbols = get_number_of_symbols(elf_info, symtab_idx);
@@ -468,8 +534,7 @@ static bool search_elf_symbol_section_for_sym(const Elf_info_t * elf_info, int s
     }
  
     void * symbols = get_elf_section(elf_info, symtab_idx);
-
-    char * symstr = NULL;  // (char *) get_elf_section(elf_info, strtab_idx);
+    char * symstr = (char *) get_elf_section(elf_info, strtab_idx);
 
     int i;
     for(i = 0; i < num_of_symbols; i++)
@@ -480,7 +545,7 @@ static bool search_elf_symbol_section_for_sym(const Elf_info_t * elf_info, int s
             continue;
         }
 
-        char * symbol_name = get_symbol_name(elf_info, strtab_idx, symbols, i, &symstr);
+        const char * symbol_name = get_symbol_name(elf_info, symbols, i, symstr);
 
         Elf32_Sym * pSym = &((Elf32_Sym *)symbols)[i];
         DEBUG_MSG("%08lx => %s (%i) {%i}", (unsigned long) pSym->st_value, symbol_name, pSym->st_size, pSym->st_shndx);
@@ -527,7 +592,7 @@ static bool search_elf_symbol_section_for_sym(const Elf_info_t * elf_info, int s
  * @return True if any found
  *
  */
-static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int symtab_idx, int strtab_idx, Address_t * addr_to_find)
+static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int symtab_idx, int strtab_idx, Addr2Sym_t * addr_to_find)
 {
     int distance = addr_to_find->distance;
     int num_of_symbols = get_number_of_symbols(elf_info, symtab_idx);
@@ -537,7 +602,7 @@ static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int 
     }
     void * symbols = get_elf_section(elf_info, symtab_idx);
 
-    char * symstr = NULL;  // (char *) get_elf_section(elf_info, strtab_idx);
+    char * symstr = (char *) get_elf_section(elf_info, strtab_idx);
 
     int bestIdx = -1;
     MemPtr_t bestValue = NULL;
@@ -551,7 +616,7 @@ static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int 
             continue;
         }
         
-        char * symbol_name = get_symbol_name(elf_info, strtab_idx, symbols, i, &symstr);
+        const char * symbol_name = get_symbol_name(elf_info, symbols, i, symstr);
 
         Elf32_Sym * pSym = &((Elf32_Sym *)symbols)[i];
         DEBUG_MSG("%08lx => %s (%i) {%i}", (unsigned long) pSym->st_value, symbol_name, pSym->st_size, pSym->st_shndx);
@@ -566,7 +631,7 @@ static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int 
 
     if(bestIdx >= 0)
     {
-        char * symbol_name = get_symbol_name(elf_info, strtab_idx, symbols, bestIdx, &symstr);
+        const char * symbol_name = get_symbol_name(elf_info, symbols, bestIdx, symstr);
 
         DEBUG_MSG("++++++ Best matched %s ++++++ ", symbol_name);
             
@@ -698,34 +763,52 @@ static const char * shtype2str(int sh_type)
     return retval;
 }
 
+/**
+ * Get the section name value for the section specified by the
+ * index
+ *
+ * @param[in] elf_info The Elf info data
+ * @param[in] shndx The index in section header of the section to get
+ *
+ * @return the section name
+ */
 static char * get_section_name(const Elf_info_t * elf_info, int shndx)
 {
     int name_idx;
     if(is_elf_32bit(elf_info))
     {
-        Elf32_Shdr * shdr = elf_info->shdr;
-        name_idx = shdr[shndx].sh_name;
+        const Elf32_Shdr * shdr = &((const Elf32_Shdr *)elf_info->shdr)[shndx];
+        name_idx = shdr->sh_name;
     }
     else
     {
-        Elf64_Shdr * shdr = elf_info->shdr;
-        name_idx = shdr[shndx].sh_name;
+        const Elf64_Shdr * shdr = &((const Elf64_Shdr *)elf_info->shdr)[shndx];
+        name_idx = shdr->sh_name;
     }
     return &elf_info->shstrtab[name_idx];
 }
 
+/**
+ * Get the section type value for the section specified by the
+ * index
+ *
+ * @param[in] elf_info The Elf info data
+ * @param[in] shndx The index in section header of the section to get
+ *
+ * @return the section name
+ */
 static unsigned get_section_type(const Elf_info_t * elf_info, int shndx)
 {
     unsigned _typ = 0;
     if(is_elf_32bit(elf_info))
     {
-        Elf32_Shdr * shdr = elf_info->shdr;
-        _typ = shdr[shndx].sh_type;
+        const Elf32_Shdr * shdr = &((const Elf32_Shdr *)elf_info->shdr)[shndx];
+        _typ = shdr->sh_type;
     }
     else
     {
-        Elf64_Shdr * shdr = elf_info->shdr;
-        _typ = shdr[shndx].sh_type;
+        const Elf64_Shdr * shdr = &((const Elf64_Shdr *)elf_info->shdr)[shndx];
+        _typ = shdr->sh_type;
     }
     return _typ;
 }
@@ -789,7 +872,7 @@ static void get_symbol_table_sections(const Elf_info_t * elf_info, bool print_sh
  * @param[in] print_shdr_table If this is the first time this table is read then print it via logging
  *    functions
  */
-static void search_elf_sections_for_symbol(const Elf_info_t * elf_info, Symbol_t * sym_to_find, bool print_shdr_tab)
+static void search_elf_sections_for_symbol(const Elf_info_t * elf_info, Sym2Addr_t * sym_to_find, bool print_shdr_tab)
 {
     bool found_some = false;
     
@@ -818,7 +901,7 @@ static void search_elf_sections_for_symbol(const Elf_info_t * elf_info, Symbol_t
  * @param[in] print_shdr_table If this is the first time this table is read then print it via logging
  *    functions
  */
-static void search_elf_sections_for_address(const Elf_info_t * elf_info, Address_t * addr_to_find, bool print_shdr_tab)
+static void search_elf_sections_for_address(const Elf_info_t * elf_info, Addr2Sym_t * addr_to_find, bool print_shdr_tab)
 {
     /* Look through the section header table */
     int symtab_idx[2] = {-1,-1};
@@ -936,7 +1019,7 @@ static void open_elf_file(Elf_info_t * elf_info)
  * @param[in] elf_info The this pointer to structure containg elf info
  * @param[in,out] sym_to_find The symbol to find
  */
-static void find_symbol_in_elf(Elf_info_t * elf_info, Symbol_t * sym_to_find)
+static void find_symbol_in_elf(Elf_info_t * elf_info, Sym2Addr_t * sym_to_find)
 {
     bool just_opened = false;
     if(elf_info->fd < 0)
@@ -950,7 +1033,7 @@ static void find_symbol_in_elf(Elf_info_t * elf_info, Symbol_t * sym_to_find)
     }
 }
 
-static void find_closest_symbol_in_elf(Elf_info_t * elf_info, Address_t * addr_to_find)
+static void find_closest_symbol_in_elf(Elf_info_t * elf_info, Addr2Sym_t * addr_to_find)
 {
     bool just_opened = false;
     if(elf_info->fd < 0)
@@ -976,38 +1059,38 @@ static void init_elf_info_struct(Elf_info_t * elf_info)
 }
 
 /**
- * Initialise the Symbol_t structure to have no found values
+ * Initialise the Sym2Addr_t structure to have no found values
  *
  * @param[in,out] sym The structure containg symbol name and values
  */
-static void init_symbol_struct(Symbol_t * sym)
+static void init_symbol_struct(Sym2Addr_t * sym)
 {
     if(sym == NULL)
     {
-        ERROR_MSG("Null pointer for Symbol_t");
+        ERROR_MSG("Null pointer for Sym2Addr_t");
         exit(EXIT_FAILURE);
     }
 
     const char * symbol = sym->name;
-    memset(sym, 0, sizeof(Symbol_t));
+    memset(sym, 0, sizeof(Sym2Addr_t));
     sym->name = symbol;
 }
 
 /**
- * Initialise the Address_t structure to have no found values
+ * Initialise the Addr2Sym_t structure to have no found values
  *
  * @param[in,out] addr The structure containg symbol name and values
  */
-static void init_address_struct(Address_t * addr)
+static void init_address_struct(Addr2Sym_t * addr)
 {
     if(addr == NULL)
     {
-        ERROR_MSG("Null pointer for Address_t");
+        ERROR_MSG("Null pointer for Addr2Sym_t");
         exit(EXIT_FAILURE);
     }
 
     MemPtr_t addr_ = addr->value;
-    memset(addr, 0, sizeof(Address_t));
+    memset(addr, 0, sizeof(Addr2Sym_t));
     addr->value = addr_;
     addr->distance = INT_MAX;
 }
@@ -1027,7 +1110,7 @@ static FILE * open_memory_map(pid_t pid)
  * @param[in] library Optional library 
  * @param[in,out] symbol Structure containg symbol info 
  */
-void find_addr_of_symbol(pid_t pid, const char * library, Symbol_t * sym_to_find)
+void find_addr_of_symbol(pid_t pid, const char * library, Sym2Addr_t * sym_to_find)
 {
     Elf_info_t elf_info;
     init_elf_info_struct(&elf_info);
@@ -1070,14 +1153,14 @@ void find_addr_of_symbol(pid_t pid, const char * library, Symbol_t * sym_to_find
 
 
 /**
- * Find the closest symbol to the address ain the Address_t and fill
+ * Find the closest symbol to the address ain the Addr2Sym_t and fill
  * that structure with the matching symbols(s)
  *
  * @param[in] pid The Process to find the symbol in
  * @param[in,out] addr_to_find Structure containg the details of
  *       the match
  */
-void find_closest_symbol(pid_t pid, Address_t * addr_to_find)
+void find_closest_symbol(pid_t pid, Addr2Sym_t * addr_to_find)
 {
     Elf_info_t elf_info;
     init_elf_info_struct(&elf_info);

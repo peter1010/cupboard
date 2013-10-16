@@ -51,7 +51,7 @@ int main(int argc, char * const argv[])
         return EXIT_FAILURE;
     }
 
-    Address_t addr;
+    Addr2Sym_t addr;
     char * endp;
     addr.value = (void *) strtoul(argv[optind], &endp, 0);
     if(*endp != '\0')
