@@ -15,13 +15,13 @@ enum Log_Level_enum
 
 extern void set_logging_level(int level);
 
-#define INIT_LOGGING static const char log_filename[] = __FILE__
+#define INIT_LOGGING static const char src_filename[] = __FILE__
 #define FINI_LOGGING log_fini()
 
-#define ERROR_MSG(...) log_msg(log_filename, __LINE__, LOG_ERROR, __VA_ARGS__)
-#define WARN_MSG(...)  log_msg(log_filename, __LINE__, LOG_WARN,  __VA_ARGS__)
-#define INFO_MSG(...)  log_msg(log_filename, __LINE__, LOG_INFO,  __VA_ARGS__)
-#define DEBUG_MSG(...) log_msg(log_filename, __LINE__, LOG_DEBUG, __VA_ARGS__)
+#define ERROR_MSG(...) log_msg(src_filename, __LINE__, LOG_ERROR, __VA_ARGS__)
+#define WARN_MSG(...)  log_msg(src_filename, __LINE__, LOG_WARN,  __VA_ARGS__)
+#define INFO_MSG(...)  log_msg(src_filename, __LINE__, LOG_INFO,  __VA_ARGS__)
+#define DEBUG_MSG(...) log_msg(src_filename, __LINE__, LOG_DEBUG, __VA_ARGS__)
 
 #define DEBUG_MSG_APPEND(...) log_msg_append(__VA_ARGS__)
 

@@ -172,7 +172,7 @@ static bool match_library(const char * to_find, const char * poss)
     const char * start = strrchr(poss, '/');
     start = (start == NULL) ? poss : &start[1];
     const char * end = strchr(start, '-');
-    const int len = (end == NULL) ? strlen(start) : end-start;
+    const unsigned len = (end == NULL) ? strlen(start) : (unsigned)(end-start);
 
     bool success = (strncmp(start, to_find, len) == 0) ? true : false;
     if(!success)
@@ -236,7 +236,7 @@ static void * get_elf_section(const Elf_info_t * elf_info, int shndx)
  
     }
     void * section = xalloc(size);
-    if( pread(elf_info->fd, section, size, offset) != size)
+    if( pread(elf_info->fd, section, size, offset) != (int) size)
     {
         ERROR_MSG("Failed to read section table");
         free(section);

@@ -13,7 +13,7 @@ void log_init()
 {
     if(!log_out)
     {
-        log_out = stdout;
+        log_out = stderr;
     }
 }
 
