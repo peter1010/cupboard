@@ -7,8 +7,6 @@
 #include "logging.h"
 #include "symbols.h"
 
-INIT_LOGGING;
-
 void end()
 {
     FINI_LOGGING;

@@ -19,8 +19,6 @@
 #include "symbols.h"
 #include "logging.h"
 
-INIT_LOGGING;
-
 /**
  * Structure containing a parsed text line from the memory map proc file
  */
