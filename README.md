@@ -22,7 +22,3 @@ addr2symbol
 Pass the PID of a process and the address. Return the name of the symbol
 which is close to that address.
 
-inject\_puts
-===========
-
-An expirement in process injection. Uncompleted.
