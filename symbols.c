@@ -495,7 +495,7 @@ static bool get_symbol_value(const Elf_info_t * elf_info, const void * symbols, 
  *
  * @return The symbol name
  */
-const static char * get_symbol_name(const Elf_info_t * elf_info, const void * symbols, int idx, const char * symstr)
+static const char * get_symbol_name(const Elf_info_t * elf_info, const void * symbols, int idx, const char * symstr)
 {
     int name_idx = 0;
     if(is_elf_32bit(elf_info))
