@@ -1,7 +1,7 @@
-cupboard
+symbols
 ========
 
-A collection of code for live inspection of running processes
+Two binaries to get Symbol name or Symbal address from a running processes
 
 Run 'make' to build the code, the build has only been tested on
 a Arch linux distro. So I make no guarantees that it
