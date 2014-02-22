@@ -6,19 +6,15 @@ LINK=gcc $(LDFLAGS)
 
 S2A_OBJS= symbols.o logging.o symbol2addr.o
 A2S_OBJS= symbols.o logging.o addr2symbol.o
-IJP_OBJS= symbols.o logging.o inject_puts.o
 
 .PHONY: all
-all: symbol2addr addr2symbol inject_puts
+all: symbol2addr addr2symbol
 
 symbol2addr: $(S2A_OBJS)
 	$(LINK) $(S2A_OBJS) -o $@
 
 addr2symbol: $(A2S_OBJS)
 	$(LINK) $(A2S_OBJS) -o $@
-
-inject_puts: $(IJP_OBJS)
-	$(LINK) $(IJP_OBJS) -o $@
 
 %.o : %.c
 	$(CC) $(CPPFLAGS) -MMD $(CFLAGS) -o $@ $<
@@ -30,4 +26,3 @@ inject_puts: $(IJP_OBJS)
 
 -include $(S2A_OBJS:.o=.d) 
 -include $(A2S_OBJS:.o=.d)
--include $(IJP_OBJS:.o=.d)
