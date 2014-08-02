@@ -60,7 +60,7 @@ void log_msg_append(const char * fmt, ...)
         va_list ap;
         va_start(ap, fmt);
 
-        fprintf(log_out, "\t");
+        fputs("\t", log_out);
         vfprintf(log_out, fmt, ap);
         fputs("\n", log_out);
 

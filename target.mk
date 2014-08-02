@@ -1,7 +1,7 @@
 #
-# Thanks goes to http://make.paulandlesley.org for the ideas and concepts that 
+# Thanks goes to http://make.paulandlesley.org for the ideas and concepts that
 # I've borrowed in these makefiles
-# 
+#
 
 .SUFFIXES:
 

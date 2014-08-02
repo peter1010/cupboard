@@ -8,7 +8,7 @@ typedef unsigned char * MemPtr_t;
 #define MAX_NUM_ADDRS_PER_SYM 5
 
 /**
- * Information about the symbol we are looking for 
+ * Information about the symbol we are looking for
  * When calling only name is required. On return
  * cnt and values will be filled in
  */

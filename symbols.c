@@ -1,8 +1,8 @@
 /**
- * Some of the ideas and concepts are borrowed from reading code written 
+ * Some of the ideas and concepts are borrowed from reading code written
  * by Victor Zandy <zandy[at]cs.wisc.edu> for getting values of symbols
  * from inspecting the /proc/xxx/maps virtual file and contents of
- * refered ELF files. To better understand ELF files I felt the need to 
+ * refered ELF files. To better understand ELF files I felt the need to
  * implement my own version.
  */
 
@@ -28,7 +28,7 @@ struct Map_entry_s
     MemPtr_t end_address;
     int permissions;                  /* r/w/x/p */
     unsigned long offset_into_file;   /* if region mapped from file, the offset into file */
-    char pathname[256];               /* if region mapped from file, the file pathname */ 
+    char pathname[256];               /* if region mapped from file, the file pathname */
 };
 
 typedef struct Map_entry_s Map_entry_t;
@@ -45,7 +45,7 @@ struct Elf_info_s
     unsigned int e_shentsize;
     unsigned int e_shoff;
     unsigned int e_shstrndx;
- 
+
     void * shdr;     /* Elf section header table */
     char * shstrtab;
 };
@@ -63,7 +63,7 @@ typedef struct Elf_info_s Elf_info_t;
 static void * xalloc(size_t size)
 {
     void * mem = malloc(size);
-    if(mem == NULL) 
+    if(mem == NULL)
     {
         LOG_ERROR("Out of memory");
 	exit(1);
@@ -89,8 +89,8 @@ static Map_entry_t * parse_map_entry(const char * linebuf)
     unsigned short dev_minor;
     unsigned long file_inode;
     const int num_parsed = sscanf(linebuf, "%lx-%lx %5s %lx %hu:%hu %lu %256s",
-			                   &start_address, 
-                                           &end_address, 
+			                   &start_address,
+                                           &end_address,
                                            &permissions[0],
                                            &entry->offset_into_file,
                                            &dev_major,
@@ -106,7 +106,7 @@ static Map_entry_t * parse_map_entry(const char * linebuf)
         LOG_ERROR("Failed to correctly read memory map");
         exit(1);
     }
-  
+
     entry->start_address = (MemPtr_t) start_address;
     entry->end_address = (MemPtr_t) end_address;
     entry->permissions = 0;
@@ -139,9 +139,9 @@ static Map_entry_t * parse_map_entry(const char * linebuf)
                 break;
         }
     }
-    LOG_DEBUG("%8p-%8p %s %08lx %s", 
-			     entry->start_address, 
-                             entry->end_address, 
+    LOG_DEBUG("%8p-%8p %s %08lx %s",
+			     entry->start_address,
+                             entry->end_address,
                              permissions,
                              entry->offset_into_file,
                              entry->pathname);
@@ -231,7 +231,7 @@ static void * get_elf_section(const Elf_info_t * elf_info, int shndx)
 
         size = shdr->sh_size;
         offset = shdr->sh_offset;
- 
+
     }
     void * section = xalloc(size);
     if( pread(elf_info->fd, section, size, offset) != (int) size)
@@ -404,7 +404,7 @@ static MemPtr_t get_raw_symbol_value(const Elf_info_t * elf_info, const void * s
 
 
 /**
- * Get the Value of the symbol 
+ * Get the Value of the symbol
  *
  * @param[in] elf_info Elf file info
  * @param[in] symbols Pointer to section containing the symbols
@@ -467,7 +467,7 @@ static bool get_symbol_value(const Elf_info_t * elf_info, const void * symbols, 
 
         /* Is this section mapped into the memory map entry we are searching */
         if((sh_offset < elf_info->mem_map->offset_into_file)
-                              || (sh_offset >= elf_info->mem_map->offset_into_file 
+                              || (sh_offset >= elf_info->mem_map->offset_into_file
                                     + (elf_info->mem_map->end_address - elf_info->mem_map->start_address)))
         {
             return false;
@@ -475,10 +475,10 @@ static bool get_symbol_value(const Elf_info_t * elf_info, const void * symbols, 
         unsigned sh_addr = get_section_address(elf_info, st_shndx);
 
         value = (MemPtr_t) get_raw_symbol_value(elf_info, symbols, idx)
-                            + (unsigned long) elf_info->mem_map->start_address 
+                            + (unsigned long) elf_info->mem_map->start_address
                             - sh_addr - elf_info->mem_map->offset_into_file + sh_offset;
 //        LOG_DEBUG("ELF Shdr, %08lx %08lx-%08lx", (unsigned long) sh_addr,
-//                                                 (unsigned long) sh_offset, 
+//                                                 (unsigned long) sh_offset,
 //                                                 (unsigned long) sh_offset+shdr->sh_size);
     }
     *pValue = value;
@@ -486,7 +486,7 @@ static bool get_symbol_value(const Elf_info_t * elf_info, const void * symbols, 
 }
 
 /**
- * Get the name of the symbol 
+ * Get the name of the symbol
  *
  * @param[in] elf_info Elf file info
  * @param[in] symbols Pointer to section containing the symbols
@@ -527,10 +527,10 @@ static bool search_elf_symbol_section_for_sym(const Elf_info_t * elf_info, int s
     bool found = false;
     int num_of_symbols = get_number_of_symbols(elf_info, symtab_idx);
     if(num_of_symbols == 0)
-    {   
+    {
         return found;
     }
- 
+
     void * symbols = get_elf_section(elf_info, symtab_idx);
     char * symstr = (char *) get_elf_section(elf_info, strtab_idx);
 
@@ -563,7 +563,7 @@ static bool search_elf_symbol_section_for_sym(const Elf_info_t * elf_info, int s
             if(i == sym_to_find->cnt)
             {
                 sym_to_find->values[sym_to_find->cnt] = value;
-            
+
                 LOG_DEBUG("%p => %s", value, symbol_name);
                 LOG_DEBUG("Mem_map => %8p - %8p", elf_info->mem_map->start_address, elf_info->mem_map->end_address);
                 LOG_DEBUG("offset into file => %08lx", elf_info->mem_map->offset_into_file);
@@ -595,7 +595,7 @@ static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int 
     int distance = addr_to_find->distance;
     int num_of_symbols = get_number_of_symbols(elf_info, symtab_idx);
     if(num_of_symbols == 0)
-    {   
+    {
         return;
     }
     void * symbols = get_elf_section(elf_info, symtab_idx);
@@ -613,7 +613,7 @@ static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int 
         {
             continue;
         }
-        
+
         const char * symbol_name = get_symbol_name(elf_info, symbols, i, symstr);
 
         Elf32_Sym * pSym = &((Elf32_Sym *)symbols)[i];
@@ -632,7 +632,7 @@ static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int 
         const char * symbol_name = get_symbol_name(elf_info, symbols, bestIdx, symstr);
 
         LOG_DEBUG("++++++ Best matched %s ++++++ ", symbol_name);
-            
+
         LOG_DEBUG("%p => %s", bestValue, symbol_name);
         LOG_DEBUG("Mem_map => %8p - %8p", elf_info->mem_map->start_address, elf_info->mem_map->end_address);
         LOG_DEBUG("offset into file => %08lx", elf_info->mem_map->offset_into_file);
@@ -674,7 +674,7 @@ static bool get_elf_section_header_table(Elf_info_t * elf_info)
 
     elf_info->shdr = buf;
     elf_info->shstrtab = shstrtab;
-    
+
     return true;
 }
 
@@ -705,10 +705,10 @@ static const char * shtype2str(int sh_type)
         case SHT_STRTAB:        /* String table */
             retval = "STRTAB";
             break;
- 
+
         case SHT_HASH:	    /* Symbol hash table */
             retval = "HASH";
-            break; 
+            break;
 
         case SHT_NOTE:          /* Notes */
             retval = "NOTE";
@@ -833,8 +833,8 @@ static void get_symbol_table_sections(const Elf_info_t * elf_info, bool print_sh
         if(print_shdr_tab)
         {
             LOG_DEBUG("ELF Shdr[%02u] %19s %11s ", idx, section_name, shtype2str(_typ));
-//            LOG_DEBUG_APPEND("%08lx %08lx-%08lx", (unsigned long) pShdr->sh_addr, 
-//                                             (unsigned long) pShdr->sh_offset, 
+//            LOG_DEBUG_APPEND("%08lx %08lx-%08lx", (unsigned long) pShdr->sh_addr,
+//                                             (unsigned long) pShdr->sh_offset,
 //                                      (unsigned long) pShdr->sh_offset+pShdr->sh_size);
         }
         switch(_typ)
@@ -844,16 +844,16 @@ static void get_symbol_table_sections(const Elf_info_t * elf_info, bool print_sh
                 break;
 
             case SHT_STRTAB:        /* String table */
-		if(strncmp(section_name, ".strtab", 7) == 0) 
+		if(strncmp(section_name, ".strtab", 7) == 0)
                 {
                     symtab_idx[1] = idx;
                 }
-		else if (strncmp(section_name, ".dynstr", 7) == 0) 
+		else if (strncmp(section_name, ".dynstr", 7) == 0)
                 {
                     dynSym_idx[1] = idx;
                 }
                 break;
- 
+
             case SHT_DYNSYM:        /* Dynamic linker symbol table (subset of symbol table) */
                 dynSym_idx[0] = idx;
                 break;
@@ -873,7 +873,7 @@ static void get_symbol_table_sections(const Elf_info_t * elf_info, bool print_sh
 static void search_elf_sections_for_symbol(const Elf_info_t * elf_info, Sym2Addr_t * sym_to_find, bool print_shdr_tab)
 {
     bool found_some = false;
-    
+
     /* Look through the section header table */
     int symtab_idx[2] = {-1, -1};
     int dynSym_idx[2] = {-1, -1};
@@ -931,7 +931,7 @@ static bool parse_elf_header(Elf_info_t * elf_info)
     bool good = false;
     void * buf = xalloc(sizeof(Elf64_Ehdr));
     const unsigned int num =  read(elf_info->fd, buf, sizeof(Elf64_Ehdr));
-    
+
     if(num >= sizeof(Elf32_Ehdr))
     {
         Elf32_Ehdr * ehdr = buf;
@@ -975,14 +975,14 @@ static void free_elf_info_struct(Elf_info_t * elf_info)
 {
     if(elf_info->fd >= 0)
     {
-        close(elf_info->fd);  
+        close(elf_info->fd);
         elf_info->fd = -1;
     }
 
-    free(elf_info->shdr);  
+    free(elf_info->shdr);
     elf_info->shdr = NULL;
 
-    free(elf_info->shstrtab);  
+    free(elf_info->shstrtab);
     elf_info->shstrtab = NULL;
 }
 
@@ -996,7 +996,7 @@ static void open_elf_file(Elf_info_t * elf_info)
 {
     bool success = false;
     int fd = open(elf_info->mem_map->pathname, O_RDONLY);
-    if( fd  > 0) 
+    if( fd  > 0)
     {
         elf_info->fd = fd;
         if(parse_elf_header(elf_info))
@@ -1105,8 +1105,8 @@ static FILE * open_memory_map(pid_t pid)
  * make up the process memory map space
  *
  * @param[in] pid The process to inspect
- * @param[in] library Optional library 
- * @param[in,out] symbol Structure containg symbol info 
+ * @param[in] library Optional library
+ * @param[in,out] symbol Structure containg symbol info
  */
 void find_addr_of_symbol(pid_t pid, const char * library, Sym2Addr_t * sym_to_find)
 {
@@ -1137,7 +1137,7 @@ void find_addr_of_symbol(pid_t pid, const char * library, Sym2Addr_t * sym_to_fi
                 }
                 else
                 {
-                    free(elf_info.mem_map); 
+                    free(elf_info.mem_map);
                     elf_info.mem_map = NULL;
                 }
             }
@@ -1162,7 +1162,7 @@ void find_closest_symbol(pid_t pid, Addr2Sym_t * addr_to_find)
 {
     Elf_info_t elf_info;
     init_elf_info_struct(&elf_info);
-    
+
     init_address_struct(addr_to_find);
 
     FILE * mem_fp = open_memory_map(pid);
@@ -1174,7 +1174,7 @@ void find_closest_symbol(pid_t pid, Addr2Sym_t * addr_to_find)
             Map_entry_t * next_map_entry = parse_map_entry(linebuf);
 
             if((next_map_entry->permissions == 0) ||
-                    (addr_to_find->value < next_map_entry->start_address) 
+                    (addr_to_find->value < next_map_entry->start_address)
                                  || (addr_to_find->value >= next_map_entry->end_address))
             {
                 free(next_map_entry);
@@ -1192,7 +1192,7 @@ void find_closest_symbol(pid_t pid, Addr2Sym_t * addr_to_find)
                 }
                 else
                 {
-                    free(elf_info.mem_map); 
+                    free(elf_info.mem_map);
                     elf_info.mem_map = NULL;
                 }
             }

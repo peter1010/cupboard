@@ -24,5 +24,5 @@ addr2symbol: $(A2S_OBJS)
 	@mv $*.P $*.d
 
 
--include $(S2A_OBJS:.o=.d) 
+-include $(S2A_OBJS:.o=.d)
 -include $(A2S_OBJS:.o=.d)
