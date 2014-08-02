@@ -65,7 +65,7 @@ static void * xalloc(size_t size)
     void * mem = malloc(size);
     if(mem == NULL) 
     {
-        ERROR_MSG("Out of memory");
+        LOG_ERROR("Out of memory");
 	exit(1);
     }
     return mem;
@@ -103,7 +103,7 @@ static Map_entry_t * parse_map_entry(const char * linebuf)
     }
     else if(num_parsed != 8)
     {
-        ERROR_MSG("Failed to correctly read memory map");
+        LOG_ERROR("Failed to correctly read memory map");
         exit(1);
     }
   
@@ -134,12 +134,12 @@ static Map_entry_t * parse_map_entry(const char * linebuf)
                 break;
 
             default:
-                ERROR_MSG("Invalid character '%c' found in memory map entry '%s'", *p, linebuf);
+                LOG_ERROR("Invalid character '%c' found in memory map entry '%s'", *p, linebuf);
                 exit(EXIT_FAILURE);
                 break;
         }
     }
-    DEBUG_MSG("%8p-%8p %s %08lx %s", 
+    LOG_DEBUG("%8p-%8p %s %08lx %s", 
 			     entry->start_address, 
                              entry->end_address, 
                              permissions,
@@ -175,7 +175,7 @@ static bool match_library(const char * to_find, const char * poss)
     bool success = (strncmp(start, to_find, len) == 0) ? true : false;
     if(!success)
     {
-        DEBUG_MSG("ignoring '%s' != '%s'", to_find, poss);
+        LOG_DEBUG("ignoring '%s' != '%s'", to_find, poss);
     }
     return success;
 }
@@ -236,7 +236,7 @@ static void * get_elf_section(const Elf_info_t * elf_info, int shndx)
     void * section = xalloc(size);
     if( pread(elf_info->fd, section, size, offset) != (int) size)
     {
-        ERROR_MSG("Failed to read section table");
+        LOG_ERROR("Failed to read section table");
         free(section);
         exit(0);
     }
@@ -270,7 +270,7 @@ static int get_number_of_symbols(const Elf_info_t * elf_info, int symtab_idx)
         assert(sizeof(Elf32_Sym) == ele_size);
     }
     int num_of_symbols = size / ele_size;
-    DEBUG_MSG("Number of symbols is %i", num_of_symbols);
+    LOG_DEBUG("Number of symbols is %i", num_of_symbols);
     return num_of_symbols;
 }
 
@@ -477,7 +477,7 @@ static bool get_symbol_value(const Elf_info_t * elf_info, const void * symbols, 
         value = (MemPtr_t) get_raw_symbol_value(elf_info, symbols, idx)
                             + (unsigned long) elf_info->mem_map->start_address 
                             - sh_addr - elf_info->mem_map->offset_into_file + sh_offset;
-//        DEBUG_MSG("ELF Shdr, %08lx %08lx-%08lx", (unsigned long) sh_addr,
+//        LOG_DEBUG("ELF Shdr, %08lx %08lx-%08lx", (unsigned long) sh_addr,
 //                                                 (unsigned long) sh_offset, 
 //                                                 (unsigned long) sh_offset+shdr->sh_size);
     }
@@ -546,17 +546,17 @@ static bool search_elf_symbol_section_for_sym(const Elf_info_t * elf_info, int s
         const char * symbol_name = get_symbol_name(elf_info, symbols, i, symstr);
 
         Elf32_Sym * pSym = &((Elf32_Sym *)symbols)[i];
-        DEBUG_MSG("%08lx => %s (%i) {%i}", (unsigned long) pSym->st_value, symbol_name, pSym->st_size, pSym->st_shndx);
+        LOG_DEBUG("%08lx => %s (%i) {%i}", (unsigned long) pSym->st_value, symbol_name, pSym->st_size, pSym->st_shndx);
         if(strcmp(sym_to_find->name, symbol_name) == 0)
         {
             found = true;
-            DEBUG_MSG("++++++ Matched %s ++++++ ", symbol_name);
+            LOG_DEBUG("++++++ Matched %s ++++++ ", symbol_name);
             int i;
             for(i = 0; i < sym_to_find->cnt; i++)
             {
                 if( sym_to_find->values[i] == value)
                 {
-                    DEBUG_MSG("Duplicate");
+                    LOG_DEBUG("Duplicate");
                     break;
                 }
             }
@@ -564,10 +564,10 @@ static bool search_elf_symbol_section_for_sym(const Elf_info_t * elf_info, int s
             {
                 sym_to_find->values[sym_to_find->cnt] = value;
             
-                DEBUG_MSG("%p => %s", value, symbol_name);
-                DEBUG_MSG("Mem_map => %8p - %8p", elf_info->mem_map->start_address, elf_info->mem_map->end_address);
-                DEBUG_MSG("offset into file => %08lx", elf_info->mem_map->offset_into_file);
-                DEBUG_MSG("++++++  ++++++ ");
+                LOG_DEBUG("%p => %s", value, symbol_name);
+                LOG_DEBUG("Mem_map => %8p - %8p", elf_info->mem_map->start_address, elf_info->mem_map->end_address);
+                LOG_DEBUG("offset into file => %08lx", elf_info->mem_map->offset_into_file);
+                LOG_DEBUG("++++++  ++++++ ");
                 if(++sym_to_find->cnt >= MAX_NUM_ADDRS_PER_SYM)
                 {
                     break;
@@ -617,7 +617,7 @@ static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int 
         const char * symbol_name = get_symbol_name(elf_info, symbols, i, symstr);
 
         Elf32_Sym * pSym = &((Elf32_Sym *)symbols)[i];
-        DEBUG_MSG("%08lx => %s (%i) {%i}", (unsigned long) pSym->st_value, symbol_name, pSym->st_size, pSym->st_shndx);
+        LOG_DEBUG("%08lx => %s (%i) {%i}", (unsigned long) pSym->st_value, symbol_name, pSym->st_size, pSym->st_shndx);
         int offset = addr_to_find->value - value;
         if((offset >= 0) && (offset < distance))
         {
@@ -631,12 +631,12 @@ static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int 
     {
         const char * symbol_name = get_symbol_name(elf_info, symbols, bestIdx, symstr);
 
-        DEBUG_MSG("++++++ Best matched %s ++++++ ", symbol_name);
+        LOG_DEBUG("++++++ Best matched %s ++++++ ", symbol_name);
             
-        DEBUG_MSG("%p => %s", bestValue, symbol_name);
-        DEBUG_MSG("Mem_map => %8p - %8p", elf_info->mem_map->start_address, elf_info->mem_map->end_address);
-        DEBUG_MSG("offset into file => %08lx", elf_info->mem_map->offset_into_file);
-        DEBUG_MSG("++++++  ++++++ ");
+        LOG_DEBUG("%p => %s", bestValue, symbol_name);
+        LOG_DEBUG("Mem_map => %8p - %8p", elf_info->mem_map->start_address, elf_info->mem_map->end_address);
+        LOG_DEBUG("offset into file => %08lx", elf_info->mem_map->offset_into_file);
+        LOG_DEBUG("++++++  ++++++ ");
 
         addr_to_find->distance = distance;
         strncpy(addr_to_find->name, symbol_name, MAX_SYMBOL_NAME_LEN);
@@ -657,7 +657,7 @@ static bool get_elf_section_header_table(Elf_info_t * elf_info)
     void * buf = xalloc(size);
     if( pread(elf_info->fd, buf, size, elf_info->e_shoff) != size)
     {
-        ERROR_MSG("Failed to Read ELF section header table");
+        LOG_ERROR("Failed to Read ELF section header table");
         free(buf);
         exit(0);
     }
@@ -666,7 +666,7 @@ static bool get_elf_section_header_table(Elf_info_t * elf_info)
     char * shstrtab = (char *) get_elf_section(elf_info, elf_info->e_shstrndx);
     if( shstrtab == NULL)
     {
-        ERROR_MSG("Failed to Read ELF section header table section names");
+        LOG_ERROR("Failed to Read ELF section header table section names");
         free(buf);
         elf_info->shdr = NULL;
         exit(0);
@@ -755,7 +755,7 @@ static const char * shtype2str(int sh_type)
             break;
 
         default:
-            ERROR_MSG("Unknown sh_type %i(%x)", sh_type, sh_type);
+            LOG_ERROR("Unknown sh_type %i(%x)", sh_type, sh_type);
             exit(0);
     }
     return retval;
@@ -832,8 +832,8 @@ static void get_symbol_table_sections(const Elf_info_t * elf_info, bool print_sh
 
         if(print_shdr_tab)
         {
-            DEBUG_MSG("ELF Shdr[%02u] %19s %11s ", idx, section_name, shtype2str(_typ));
-//            DEBUG_MSG_APPEND("%08lx %08lx-%08lx", (unsigned long) pShdr->sh_addr, 
+            LOG_DEBUG("ELF Shdr[%02u] %19s %11s ", idx, section_name, shtype2str(_typ));
+//            LOG_DEBUG_APPEND("%08lx %08lx-%08lx", (unsigned long) pShdr->sh_addr, 
 //                                             (unsigned long) pShdr->sh_offset, 
 //                                      (unsigned long) pShdr->sh_offset+pShdr->sh_size);
         }
@@ -1065,7 +1065,7 @@ static void init_symbol_struct(Sym2Addr_t * sym)
 {
     if(sym == NULL)
     {
-        ERROR_MSG("Null pointer for Sym2Addr_t");
+        LOG_ERROR("Null pointer for Sym2Addr_t");
         exit(EXIT_FAILURE);
     }
 
@@ -1083,7 +1083,7 @@ static void init_address_struct(Addr2Sym_t * addr)
 {
     if(addr == NULL)
     {
-        ERROR_MSG("Null pointer for Addr2Sym_t");
+        LOG_ERROR("Null pointer for Addr2Sym_t");
         exit(EXIT_FAILURE);
     }
 
@@ -1181,7 +1181,7 @@ void find_closest_symbol(pid_t pid, Addr2Sym_t * addr_to_find)
                 continue;
             }
 
-            DEBUG_MSG("Address in %s", next_map_entry->pathname);
+            LOG_DEBUG("Address in %s", next_map_entry->pathname);
 
             if(elf_info.mem_map)     /* Is there a previous map_entry? */
             {

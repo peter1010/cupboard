@@ -5,32 +5,44 @@
  * Some Logging code
  */
 
+/**
+ * Logging levels
+ */
 enum Log_Level_enum
 {
-    LOG_ERROR,
-    LOG_WARN,
-    LOG_INFO,
-    LOG_DEBUG
+    LOG_ERROR_LVL,
+    LOG_WARN_LVL,
+    LOG_INFO_LVL,
+    LOG_DEBUG_LVL
 };
 
-extern void set_logging_level(int level);
+extern void set_logging_level(unsigned level);
 
-static const char src_filename[] = __BASE_FILE__;
+#ifdef __BASE_FILE__
+static const char log_category[] = __BASE_FILE__;
+#else
+/* Place this macro at top of all files that using logging */
+#define SET_LOG_CATEGORY static const char log_category[] = __FILE__
+#endif
 
-#define FINI_LOGGING log_fini()
+/* Use these macros to log messages for different levels */
+#define LOG_ERROR(...) log_msg(log_category, __LINE__, LOG_ERROR_LVL, __VA_ARGS__)
+#define LOG_WARN(...)  log_msg(log_category, __LINE__, LOG_WARN_LVL,  __VA_ARGS__)
+#define LOG_INFO(...)  log_msg(log_category, __LINE__, LOG_INFO_LVL,  __VA_ARGS__)
+#define LOG_DEBUG(...) log_msg(log_category, __LINE__, LOG_DEBUG_LVL, __VA_ARGS__)
 
-#define ERROR_MSG(...) log_msg(src_filename, __LINE__, LOG_ERROR, __VA_ARGS__)
-#define WARN_MSG(...)  log_msg(src_filename, __LINE__, LOG_WARN,  __VA_ARGS__)
-#define INFO_MSG(...)  log_msg(src_filename, __LINE__, LOG_INFO,  __VA_ARGS__)
-#define DEBUG_MSG(...) log_msg(src_filename, __LINE__, LOG_DEBUG, __VA_ARGS__)
+/* Append additional info to previous log message */
+#define LOG_APPEND(...) log_msg_append(__VA_ARGS__)
 
-#define DEBUG_MSG_APPEND(...) log_msg_append(__VA_ARGS__)
+extern void log_msg(
+    const char * category,
+    int line,
+    unsigned level,
+    const char * fmt,
+    ...) __attribute__((format (printf, 4, 5)));
 
-extern void log_msg(const char * filename, int line, unsigned level, const char * fmt, ...)
-    __attribute__((format (printf, 4, 5)));
-
-extern void log_msg_append(const char * fmt, ...) __attribute__((format (printf, 1, 2)));
-
-extern void log_fini();
+extern void log_msg_append(
+    const char * fmt,
+    ...) __attribute__((format (printf, 1, 2)));
 
 #endif

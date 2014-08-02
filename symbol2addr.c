@@ -6,11 +6,6 @@
 #include "logging.h"
 #include "symbols.h"
 
-void end()
-{
-    FINI_LOGGING;
-}
-
 static void print_usage()
 {
     fprintf(stderr, "Usage: [-v level] -p pid symbol_name\n");
@@ -18,8 +13,6 @@ static void print_usage()
 
 int main(int argc, char * const argv[])
 {
-    atexit(end);
-
     pid_t tgt_pid = -1;
     int opt;
     while((opt = getopt(argc, argv, "v:p:")) != -1)
@@ -52,8 +45,6 @@ int main(int argc, char * const argv[])
     sym.name = argv[optind];
 
     find_addr_of_symbol(tgt_pid, NULL, &sym);
-
-    FINI_LOGGING;
 
     int i;
     for(i = 0; i < sym.cnt; i++)

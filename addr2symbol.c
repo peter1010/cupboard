@@ -7,11 +7,6 @@
 #include "logging.h"
 #include "symbols.h"
 
-void end()
-{
-    FINI_LOGGING;
-}
-
 static void print_usage()
 {
     fprintf(stderr, "Usage: [-v level] -p pid address\n");
@@ -19,8 +14,6 @@ static void print_usage()
 
 int main(int argc, char * const argv[])
 {
-    atexit(end);
-
     pid_t tgt_pid = -1;
     int opt;
     while((opt = getopt(argc, argv, "v:p:")) != -1)
@@ -58,7 +51,6 @@ int main(int argc, char * const argv[])
     }
     find_closest_symbol(tgt_pid, &addr);
 
-    FINI_LOGGING;
     printf("In process %i; %p is close to %s [+%i]\n", tgt_pid, addr.value, addr.name, addr.distance);
     return EXIT_SUCCESS;
 }

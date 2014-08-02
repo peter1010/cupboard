@@ -4,7 +4,7 @@
 
 #include "logging.h"
 
-static int log_level = LOG_WARN;
+static unsigned log_level = LOG_WARN_LVL;
 static bool log_append_allowed = false;
 static FILE * log_out = NULL;
 
@@ -17,7 +17,7 @@ void log_init()
     }
 }
 
-void set_logging_level(int level)
+void set_logging_level(unsigned level)
 {
     log_level = level;
 }
@@ -31,7 +31,7 @@ void set_logging_level(int level)
  * @param[in] fmt The format string in the style of printf
  * @param[in] args Variable args
  */
-void log_msg(const char * filename, int line, unsigned level, const char * fmt, ...)
+void log_msg(const char * category, int line, unsigned level, const char * fmt, ...)
 {
     if(level <= log_level)
     {
@@ -40,8 +40,9 @@ void log_msg(const char * filename, int line, unsigned level, const char * fmt, 
         va_list ap;
         va_start(ap, fmt);
 
-        fprintf(log_out, "\n[%s:%i] ", filename, line);
+        fprintf(log_out, "[%s:%i] ", category, line);
         vfprintf(log_out, fmt, ap);
+        fputs("\n", log_out);
 
         va_end(ap);
         log_append_allowed = true;
@@ -59,16 +60,10 @@ void log_msg_append(const char * fmt, ...)
         va_list ap;
         va_start(ap, fmt);
 
+        fprintf(log_out, "\t");
         vfprintf(log_out, fmt, ap);
+        fputs("\n", log_out);
 
         va_end(ap);
-    }
-}
-
-void log_fini()
-{
-    if(log_out)
-    {
-        fprintf(log_out, "\n");
     }
 }
