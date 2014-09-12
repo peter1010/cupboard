@@ -28,7 +28,7 @@ struct Map_entry_s
     MemPtr_t end_address;
     int permissions;                  /* r/w/x/p */
     unsigned long offset_into_file;   /* if region mapped from file, the offset into file */
-    char pathname[256];               /* if region mapped from file, the file pathname */
+    char * pathname;                  /* if region mapped from file, the file pathname */
 };
 
 typedef struct Map_entry_s Map_entry_t;
@@ -41,8 +41,8 @@ struct Elf_info_s
     Map_entry_t * mem_map;
     int fd;
 
-    unsigned int e_shnum;  /* Number of entrie in section header table */
-    unsigned int e_shentsize;
+    unsigned int num_of_sections;
+    unsigned int section_entry_size;
     unsigned int e_shoff;
     unsigned int e_shstrndx;
 
@@ -53,8 +53,7 @@ struct Elf_info_s
 typedef struct Elf_info_s Elf_info_t;
 
 /**
- * Version of malloc that terminates the program when we run out of
- * memory.
+ * Version of malloc that terminates the program when we run out of memory.
  *
  * @param[in] size The size of memory to allocate
  *
@@ -66,7 +65,7 @@ static void * xalloc(size_t size)
     if(mem == NULL)
     {
         LOG_ERROR("Out of memory");
-	exit(1);
+        exit(EXIT_FAILURE);
     }
     return mem;
 }
@@ -88,6 +87,7 @@ static Map_entry_t * parse_map_entry(const char * linebuf)
     unsigned short dev_major;
     unsigned short dev_minor;
     unsigned long file_inode;
+    char * pathname = malloc(256);
     const int num_parsed = sscanf(linebuf, "%lx-%lx %5s %lx %hu:%hu %lu %256s",
 			                   &start_address,
                                            &end_address,
@@ -96,15 +96,20 @@ static Map_entry_t * parse_map_entry(const char * linebuf)
                                            &dev_major,
                                            &dev_minor,
                                            &file_inode,
-                                           &entry->pathname[0]);
+                                           pathname);
     if(num_parsed == 7)
     {
-        entry->pathname[0] = '\0';
+        free(pathname);
+        entry->pathname = NULL;
     }
-    else if(num_parsed != 8)
+    else
     {
-        LOG_ERROR("Failed to correctly read memory map");
-        exit(1);
+        entry->pathname = pathname;
+        if(num_parsed != 8)
+        {
+            LOG_ERROR("Failed to correctly read memory map");
+            exit(EXIT_FAILURE);
+        }
     }
 
     entry->start_address = (MemPtr_t) start_address;
@@ -148,6 +153,12 @@ static Map_entry_t * parse_map_entry(const char * linebuf)
     return entry;
 }
 
+static void free_map_entry(Map_entry_t * entry)
+{
+    free(entry->pathname);
+    free(entry);
+}
+
 /**
  * Does the to_find library match the one we have found.
  *
@@ -158,7 +169,7 @@ static Map_entry_t * parse_map_entry(const char * linebuf)
  */
 static bool match_library(const char * to_find, const char * poss)
 {
-    if(*poss == '\0')
+    if((poss == NULL) || (*poss == '\0'))
     {
         return false;
     }
@@ -189,7 +200,7 @@ static bool match_library(const char * to_find, const char * poss)
  */
 static bool is_elf_32bit(const Elf_info_t * elf_info)
 {
-    return (elf_info->e_shentsize == sizeof(Elf32_Shdr)) ? true : false;
+    return (elf_info->section_entry_size == sizeof(Elf32_Shdr)) ? true : false;
 }
 
 /**
@@ -201,7 +212,7 @@ static bool is_elf_32bit(const Elf_info_t * elf_info)
  */
 static bool is_elf_64bit(const Elf_info_t * elf_info)
 {
-    return (elf_info->e_shentsize == sizeof(Elf64_Shdr)) ? true : false;
+    return (elf_info->section_entry_size == sizeof(Elf64_Shdr)) ? true : false;
 }
 
 
@@ -454,7 +465,7 @@ static bool get_symbol_value(const Elf_info_t * elf_info, const void * symbols, 
             return false;
         }
     }
-    else if(st_shndx >= elf_info->e_shnum)
+    else if(st_shndx >= elf_info->num_of_sections)
     {
 //        char  * symstr = (char *) get_elf_section(elf_info, strtab_idx);
 //        WARN_MSG("CHECK %s %u", &symstr[pSym->st_name], pSym->st_shndx);
@@ -653,7 +664,7 @@ static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int 
  */
 static bool get_elf_section_header_table(Elf_info_t * elf_info)
 {
-    size_t size = elf_info->e_shentsize * elf_info->e_shnum;
+    const ssize_t size = elf_info->section_entry_size * elf_info->num_of_sections;
     void * buf = xalloc(size);
     if( pread(elf_info->fd, buf, size, elf_info->e_shoff) != size)
     {
@@ -755,8 +766,9 @@ static const char * shtype2str(int sh_type)
             break;
 
         default:
-            LOG_ERROR("Unknown sh_type %i(%x)", sh_type, sh_type);
-            exit(0);
+//            LOG_ERROR("Unknown sh_type %i(%x)", sh_type, sh_type);
+            retval = "unknown";
+            break;
     }
     return retval;
 }
@@ -803,10 +815,15 @@ static unsigned get_section_type(const Elf_info_t * elf_info, int shndx)
         const Elf32_Shdr * shdr = &((const Elf32_Shdr *)elf_info->shdr)[shndx];
         _typ = shdr->sh_type;
     }
-    else
+    else if(is_elf_64bit(elf_info))
     {
         const Elf64_Shdr * shdr = &((const Elf64_Shdr *)elf_info->shdr)[shndx];
         _typ = shdr->sh_type;
+    }
+    else
+    {
+        LOG_ERROR("Bad Elf bit size");
+        exit(EXIT_FAILURE);
     }
     return _typ;
 }
@@ -823,8 +840,8 @@ static unsigned get_section_type(const Elf_info_t * elf_info, int shndx)
 static void get_symbol_table_sections(const Elf_info_t * elf_info, bool print_shdr_tab, int * symtab_idx, int * dynSym_idx)
 {
     /* Look through the section header table */
-    int idx = 0;
-    for(; idx < elf_info->e_shnum; idx++)
+    unsigned idx = 0;
+    for(; idx < elf_info->num_of_sections; idx++)
     {
         char * section_name = get_section_name(elf_info, idx);
 
@@ -919,7 +936,7 @@ static void search_elf_sections_for_address(const Elf_info_t * elf_info, Addr2Sy
 }
 
 /**
- * Get the Elf header
+ * Parse the Elf header
  *
  * @param[in] fd The open file descriptor for the ELF file
  * @param[in] pathname The name of the Elf file
@@ -940,8 +957,8 @@ static bool parse_elf_header(Elf_info_t * elf_info)
                   && (sizeof(Elf32_Shdr) == ehdr->e_shentsize))
         {
             good = true;
-            elf_info->e_shnum = ehdr->e_shnum;
-            elf_info->e_shentsize = ehdr->e_shentsize;
+            elf_info->num_of_sections = ehdr->e_shnum;
+            elf_info->section_entry_size = ehdr->e_shentsize;
             elf_info->e_shoff = ehdr->e_shoff;
             elf_info->e_shstrndx = ehdr->e_shstrndx;
         }
@@ -955,8 +972,8 @@ static bool parse_elf_header(Elf_info_t * elf_info)
                   && (sizeof(Elf64_Shdr) == ehdr->e_shentsize))
         {
             good = true;
-            elf_info->e_shnum = ehdr->e_shnum;
-            elf_info->e_shentsize = ehdr->e_shentsize;
+            elf_info->num_of_sections = ehdr->e_shnum;
+            elf_info->section_entry_size = ehdr->e_shentsize;
             elf_info->e_shoff = ehdr->e_shoff;
             elf_info->e_shstrndx = ehdr->e_shstrndx;
         }
@@ -995,16 +1012,19 @@ static void free_elf_info_struct(Elf_info_t * elf_info)
 static void open_elf_file(Elf_info_t * elf_info)
 {
     bool success = false;
-    int fd = open(elf_info->mem_map->pathname, O_RDONLY);
-    if( fd  > 0)
+    const char * pathname = elf_info->mem_map->pathname;
+    if(pathname)
     {
-        elf_info->fd = fd;
-        if(parse_elf_header(elf_info))
+        const int fd = open(pathname, O_RDONLY);
+        if( fd  > 0)
         {
-            success = get_elf_section_header_table(elf_info);
+            elf_info->fd = fd;
+            if(parse_elf_header(elf_info))
+            {
+                success = get_elf_section_header_table(elf_info);
+            }
         }
     }
-
     if(!success)
     {
         free_elf_info_struct(elf_info);
@@ -1100,6 +1120,22 @@ static FILE * open_memory_map(pid_t pid)
     return fopen(memory_map, "r");
 }
 
+static bool same_pathname(const char * pathname1, const char * pathname2)
+{
+    if(pathname1)
+    {
+        if(pathname2)
+        {
+            return strcmp(pathname1, pathname2) == 0 ? true : false;
+        }
+        return false;
+    }
+    else
+    {
+        return pathname2 == NULL ? true : false;
+    }
+}
+
 /**
  * Find the symbol in the process by looking up in the ELF files that
  * make up the process memory map space
@@ -1125,19 +1161,19 @@ void find_addr_of_symbol(pid_t pid, const char * library, Sym2Addr_t * sym_to_fi
 
             if((next_map_entry->permissions == 0) || !match_library(library, next_map_entry->pathname))
             {
-                free(next_map_entry);
+                free_map_entry(next_map_entry);
                 continue;
             }
             if(elf_info.mem_map)     /* Is there a previous map_entry? */
             {
                 /* But it's a different ELF file */
-                if(strcmp(elf_info.mem_map->pathname, next_map_entry->pathname) != 0)
+                if(!same_pathname(elf_info.mem_map->pathname, next_map_entry->pathname))
                 {
                     free_elf_info_struct(&elf_info);
                 }
                 else
                 {
-                    free(elf_info.mem_map);
+                    free_map_entry(elf_info.mem_map);
                     elf_info.mem_map = NULL;
                 }
             }
@@ -1177,7 +1213,7 @@ void find_closest_symbol(pid_t pid, Addr2Sym_t * addr_to_find)
                     (addr_to_find->value < next_map_entry->start_address)
                                  || (addr_to_find->value >= next_map_entry->end_address))
             {
-                free(next_map_entry);
+                free_map_entry(next_map_entry);
                 continue;
             }
 
@@ -1186,13 +1222,13 @@ void find_closest_symbol(pid_t pid, Addr2Sym_t * addr_to_find)
             if(elf_info.mem_map)     /* Is there a previous map_entry? */
             {
                 /* But it's a different ELF file */
-                if(strcmp(elf_info.mem_map->pathname, next_map_entry->pathname) != 0)
+                if(!same_pathname(elf_info.mem_map->pathname, next_map_entry->pathname))
                 {
                     free_elf_info_struct(&elf_info);
                 }
                 else
                 {
-                    free(elf_info.mem_map);
+                    free_map_entry(elf_info.mem_map);
                     elf_info.mem_map = NULL;
                 }
             }
@@ -1200,8 +1236,12 @@ void find_closest_symbol(pid_t pid, Addr2Sym_t * addr_to_find)
             int distance = addr_to_find->value - next_map_entry->start_address;
             if(distance < addr_to_find->distance)
             {
-                strncpy(addr_to_find->name, next_map_entry->pathname, MAX_SYMBOL_NAME_LEN);
-                addr_to_find->distance = distance;
+                if(next_map_entry->pathname)
+                {
+                    /* Symbol, could be the name of the library... */
+                    strncpy(addr_to_find->name, next_map_entry->pathname, MAX_SYMBOL_NAME_LEN);
+                    addr_to_find->distance = distance;
+                }
             }
             find_closest_symbol_in_elf(&elf_info, addr_to_find);
         }
