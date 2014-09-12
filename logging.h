@@ -1,9 +1,13 @@
 #ifndef _LOGGING_H_
 #define _LOGGING_H_
 
+#include <stdbool.h>
+
 /**
  * Some Logging code
  */
+
+#define LOG_TIMESTAMP
 
 /**
  * Logging levels
@@ -18,31 +22,38 @@ enum Log_Level_enum
 
 extern void set_logging_level(unsigned level);
 
-#ifdef __BASE_FILE__
-static const char log_category[] = __BASE_FILE__;
-#else
-/* Place this macro at top of all files that using logging */
-#define SET_LOG_CATEGORY static const char log_category[] = __FILE__
-#endif
+#define _LOG_MSG(level, ...) \
+    do { void * hnd = open_logger(level); \
+         if(hnd) \
+            log_msg(hnd, __VA_ARGS__); \
+    } while(0)
+
+#define _LOG_ERRNO(level, ...)\
+    do { void * hnd = open_logger(level); \
+         if(hnd) \
+            log_errno(hnd, __VA_ARGS__); \
+    } while(0)
+
 
 /* Use these macros to log messages for different levels */
-#define LOG_ERROR(...) log_msg(log_category, __LINE__, LOG_ERROR_LVL, __VA_ARGS__)
-#define LOG_WARN(...)  log_msg(log_category, __LINE__, LOG_WARN_LVL,  __VA_ARGS__)
-#define LOG_INFO(...)  log_msg(log_category, __LINE__, LOG_INFO_LVL,  __VA_ARGS__)
-#define LOG_DEBUG(...) log_msg(log_category, __LINE__, LOG_DEBUG_LVL, __VA_ARGS__)
+#define LOG_ERROR(...) _LOG_MSG(LOG_ERROR_LVL, __VA_ARGS__)
+#define LOG_WARN(...)  _LOG_MSG(LOG_WARN_LVL,  __VA_ARGS__)
+#define LOG_INFO(...)  _LOG_MSG(LOG_INFO_LVL,  __VA_ARGS__)
+#define LOG_DEBUG(...) _LOG_MSG(LOG_DEBUG_LVL, __VA_ARGS__)
 
-/* Append additional info to previous log message */
-#define LOG_APPEND(...) log_msg_append(__VA_ARGS__)
+#define LOG_ERRNO_AS_ERROR(...) _LOG_ERRNO(LOG_ERROR_LVL, __VA_ARGS__)
+
+extern void * open_logger(unsigned level);
 
 extern void log_msg(
-    const char * category,
-    int line,
-    unsigned level,
+    void * hnd,
     const char * fmt,
-    ...) __attribute__((format (printf, 4, 5)));
+    ...) __attribute__((format (printf, 2, 3)));
 
-extern void log_msg_append(
+
+extern void log_errno(
+    void * hnd,
     const char * fmt,
-    ...) __attribute__((format (printf, 1, 2)));
+    ...) __attribute__((format (printf, 2, 3)));
 
 #endif
