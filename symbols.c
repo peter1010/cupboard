@@ -70,6 +70,10 @@ static void * xalloc(size_t size)
     return mem;
 }
 
+#define XSTR(x) STR(x)
+#define STR(x) #x
+#define MAX_PERMISSIONS_CHARS 5
+
 /**
  * Parse an entry in the /proc/xxx/map output
  *
@@ -81,35 +85,26 @@ static Map_entry_t * parse_map_entry(const char * linebuf)
 {
     Map_entry_t * entry = xalloc(sizeof(Map_entry_t));
 
+    memset(entry, 0, sizeof(Map_entry_t));
     unsigned long start_address = 0;
     unsigned long end_address = 0;
-    char permissions[10] = {0};
+    char permissions[MAX_PERMISSIONS_CHARS+1] = {0};
     unsigned short dev_major;
     unsigned short dev_minor;
     unsigned long file_inode;
-    char * pathname = malloc(256);
-    const int num_parsed = sscanf(linebuf, "%lx-%lx %5s %lx %hu:%hu %lu %256s",
+    const int num_parsed = sscanf(linebuf, "%lx-%lx %" XSTR(MAX_PERMISSIONS_CHARS) "s %lx %hx:%hx %lu %ms",
 			                   &start_address,
                                            &end_address,
-                                           &permissions[0],
+                                           permissions,
                                            &entry->offset_into_file,
                                            &dev_major,
                                            &dev_minor,
                                            &file_inode,
-                                           pathname);
-    if(num_parsed == 7)
+                                           &entry->pathname);
+    if(num_parsed < 7)
     {
-        free(pathname);
-        entry->pathname = NULL;
-    }
-    else
-    {
-        entry->pathname = pathname;
-        if(num_parsed != 8)
-        {
-            LOG_ERROR("Failed to correctly read memory map");
-            exit(EXIT_FAILURE);
-        }
+        LOG_ERROR("Failed to parse memory map line '%s' (%i)", linebuf, num_parsed);
+        exit(EXIT_FAILURE);
     }
 
     entry->start_address = (MemPtr_t) start_address;
