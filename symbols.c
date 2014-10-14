@@ -41,12 +41,13 @@ struct Elf_info_s
     Map_entry_t * mem_map;
     int fd;
 
+    int arch_size;
     unsigned int num_of_sections;
     unsigned int section_entry_size;
     unsigned int e_shoff;
     unsigned int e_shstrndx;
 
-    void * shdr;     /* Elf section header table */
+    uint8_t * shdr;     /* Elf section header table */
     char * shstrtab;
 };
 
@@ -195,7 +196,7 @@ static bool match_library(const char * to_find, const char * poss)
  */
 static bool is_elf_32bit(const Elf_info_t * elf_info)
 {
-    return (elf_info->section_entry_size == sizeof(Elf32_Shdr)) ? true : false;
+    return (elf_info->arch_size == 32) ? true : false;
 }
 
 /**
@@ -207,7 +208,7 @@ static bool is_elf_32bit(const Elf_info_t * elf_info)
  */
 static bool is_elf_64bit(const Elf_info_t * elf_info)
 {
-    return (elf_info->section_entry_size == sizeof(Elf64_Shdr)) ? true : false;
+    return (elf_info->arch_size == 64) ? true : false;
 }
 
 
@@ -223,17 +224,18 @@ static void * get_elf_section(const Elf_info_t * elf_info, int shndx)
 {
     size_t size = 0;
     unsigned long offset = 0;
+    uint8_t * p = &elf_info->shdr[shndx * elf_info->section_entry_size];
 
     if(is_elf_32bit(elf_info))
     {
-        const Elf32_Shdr * shdr = &((const Elf32_Shdr *)elf_info->shdr)[shndx];
+        const Elf32_Shdr * shdr = (const Elf32_Shdr *)p;
 
         size = shdr->sh_size;
         offset = shdr->sh_offset;
     }
     else
     {
-        const Elf64_Shdr * shdr = &((const Elf64_Shdr *)elf_info->shdr)[shndx];
+        const Elf64_Shdr * shdr = (const Elf64_Shdr *)p;
 
         size = shdr->sh_size;
         offset = shdr->sh_offset;
@@ -261,16 +263,18 @@ static int get_number_of_symbols(const Elf_info_t * elf_info, int symtab_idx)
 {
     unsigned size = 0;
     unsigned ele_size = 0;
+    uint8_t * p = &elf_info->shdr[symtab_idx * elf_info->section_entry_size];
+
     if(is_elf_32bit(elf_info))
     {
-        const Elf32_Shdr * symtab = &((const Elf32_Shdr *)elf_info->shdr)[symtab_idx];
+        const Elf32_Shdr * symtab = (const Elf32_Shdr *)p;
         size = symtab->sh_size;
         ele_size = symtab->sh_entsize;
         assert(sizeof(Elf32_Sym) == ele_size);
     }
     else
     {
-        const Elf64_Shdr * symtab = &((const Elf64_Shdr *)elf_info->shdr)[symtab_idx];
+        const Elf64_Shdr * symtab = (const Elf64_Shdr *)p;
         size = symtab->sh_size;
         ele_size = symtab->sh_entsize;
         assert(sizeof(Elf32_Sym) == ele_size);
@@ -292,14 +296,16 @@ static int get_number_of_symbols(const Elf_info_t * elf_info, int symtab_idx)
 static unsigned get_section_offset(const Elf_info_t * elf_info, int shndx)
 {
     unsigned offset = 0;
+    uint8_t * p = &elf_info->shdr[shndx * elf_info->section_entry_size];
+
     if(is_elf_32bit(elf_info))
     {
-        const Elf32_Shdr * shdr = &((const Elf32_Shdr *)elf_info->shdr)[shndx];
+        const Elf32_Shdr * shdr = (const Elf32_Shdr *)p;
         offset = shdr->sh_offset;
     }
     else
     {
-        const Elf64_Shdr * shdr = &((const Elf64_Shdr *)elf_info->shdr)[shndx];
+        const Elf64_Shdr * shdr = (const Elf64_Shdr *)p;
         offset = shdr->sh_offset;
     }
     return offset;
@@ -317,14 +323,15 @@ static unsigned get_section_offset(const Elf_info_t * elf_info, int shndx)
 static unsigned get_section_address(const Elf_info_t * elf_info, int shndx)
 {
     unsigned address = 0;
+    uint8_t * p = &elf_info->shdr[shndx * elf_info->section_entry_size];
     if(is_elf_32bit(elf_info))
     {
-        const Elf32_Shdr * shdr = &((const Elf32_Shdr *)elf_info->shdr)[shndx];
+        const Elf32_Shdr * shdr = (const Elf32_Shdr *)p;
         address = shdr->sh_addr;
     }
     else
     {
-        const Elf64_Shdr * shdr = &((const Elf64_Shdr *)elf_info->shdr)[shndx];
+        const Elf64_Shdr * shdr = (const Elf64_Shdr *)p;
         address = shdr->sh_addr;
     }
     return address;
@@ -940,41 +947,56 @@ static void search_elf_sections_for_address(const Elf_info_t * elf_info, Addr2Sy
  */
 static bool parse_elf_header(Elf_info_t * elf_info)
 {
+    uint8_t buf[sizeof(Elf64_Ehdr)];
     bool good = false;
-    void * buf = xalloc(sizeof(Elf64_Ehdr));
-    const unsigned int num =  read(elf_info->fd, buf, sizeof(Elf64_Ehdr));
-
-    if(num >= sizeof(Elf32_Ehdr))
+    const unsigned int num = read(elf_info->fd, buf, sizeof(buf));
+    if(num < EI_NIDENT)
     {
-        Elf32_Ehdr * ehdr = buf;
-	if( (memcmp(ELFMAG, ehdr->e_ident, SELFMAG) == 0)
-               && (sizeof(Elf32_Ehdr) == ehdr->e_ehsize)
-                  && (sizeof(Elf32_Shdr) == ehdr->e_shentsize))
-        {
-            good = true;
-            elf_info->num_of_sections = ehdr->e_shnum;
-            elf_info->section_entry_size = ehdr->e_shentsize;
-            elf_info->e_shoff = ehdr->e_shoff;
-            elf_info->e_shstrndx = ehdr->e_shstrndx;
-        }
+        LOG_ERROR("Failed to read ELF ident");
+        return false;
     }
-
-    if(!good && (num >= sizeof(Elf64_Ehdr)))
+    if(memcmp(ELFMAG, buf, SELFMAG) != 0)
     {
-        Elf64_Ehdr * ehdr = buf;
-	if( (memcmp(ELFMAG, ehdr->e_ident, SELFMAG) == 0)
-               && (sizeof(Elf64_Ehdr) == ehdr->e_ehsize)
-                  && (sizeof(Elf64_Shdr) == ehdr->e_shentsize))
-        {
-            good = true;
-            elf_info->num_of_sections = ehdr->e_shnum;
-            elf_info->section_entry_size = ehdr->e_shentsize;
-            elf_info->e_shoff = ehdr->e_shoff;
-            elf_info->e_shstrndx = ehdr->e_shstrndx;
-        }
+        LOG_ERROR("No ELF Magic seen");
+        return false;
     }
+    switch(buf[EI_CLASS])
+    {
+        case ELFCLASS32:
+            {
+                const Elf32_Ehdr * ehdr = (const Elf32_Ehdr *)buf;
 
-    free(buf);
+                if((sizeof(Elf32_Ehdr) <= ehdr->e_ehsize) && (sizeof(Elf32_Ehdr) <= num))
+                {
+                    good = true;
+                    elf_info->arch_size = 32;
+                    elf_info->num_of_sections = ehdr->e_shnum;
+                    elf_info->section_entry_size = ehdr->e_shentsize;
+                    elf_info->e_shoff = ehdr->e_shoff;
+                    elf_info->e_shstrndx = ehdr->e_shstrndx;
+                }
+            }
+            break;
+        case ELFCLASS64:
+            {
+                const Elf64_Ehdr * ehdr = (const Elf64_Ehdr *)buf;
+
+                if((sizeof(Elf64_Ehdr) <= ehdr->e_ehsize) && (sizeof(Elf64_Ehdr) <= num))
+                {
+                    good = true;
+                    elf_info->arch_size = 64;
+                    elf_info->num_of_sections = ehdr->e_shnum;
+                    elf_info->section_entry_size = ehdr->e_shentsize;
+                    elf_info->e_shoff = ehdr->e_shoff;
+                    elf_info->e_shstrndx = ehdr->e_shstrndx;
+                }
+            }
+            break;
+
+        default:
+            LOG_ERROR("Unknown class type");
+            return false;
+    }
     return good;
 }
 
