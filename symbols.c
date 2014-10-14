@@ -270,14 +270,14 @@ static int get_number_of_symbols(const Elf_info_t * elf_info, int symtab_idx)
         const Elf32_Shdr * symtab = (const Elf32_Shdr *)p;
         size = symtab->sh_size;
         ele_size = symtab->sh_entsize;
-        assert(sizeof(Elf32_Sym) == ele_size);
+        assert(sizeof(Elf32_Sym) <= ele_size);
     }
     else
     {
         const Elf64_Shdr * symtab = (const Elf64_Shdr *)p;
         size = symtab->sh_size;
         ele_size = symtab->sh_entsize;
-        assert(sizeof(Elf32_Sym) == ele_size);
+        assert(sizeof(Elf64_Sym) <= ele_size);
     }
     int num_of_symbols = size / ele_size;
     LOG_DEBUG("Number of symbols is %i", num_of_symbols);
