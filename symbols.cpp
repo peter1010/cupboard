@@ -387,7 +387,7 @@ static const char * get_symbol_name(const Elf_info_t * elf_info, const void * sy
  * @return True if any found
  *
  */
-static bool search_elf_symbol_section_for_sym(const Elf_info_t * elf_info, int symtab_idx, int strtab_idx, Sym2Addr_t * sym_to_find)
+static bool search_elf_symbol_section_for_sym(const Elf_info_t * elf_info, int symtab_idx, int strtab_idx, Sym2Addr * sym_to_find)
 {
     bool found = false;
     int num_of_symbols = get_number_of_symbols(elf_info, symtab_idx);
@@ -412,27 +412,16 @@ static bool search_elf_symbol_section_for_sym(const Elf_info_t * elf_info, int s
 
         Elf32_Sym * pSym = &((Elf32_Sym *)symbols)[i];
         LOG_DEBUG("%08lx => %s (%i) {%i}", (unsigned long) pSym->st_value, symbol_name, pSym->st_size, pSym->st_shndx);
-        if(strcmp(sym_to_find->name, symbol_name) == 0)
+        if(sym_to_find->match(symbol_name))
         {
             found = true;
             LOG_DEBUG("++++++ Matched %s ++++++ ", symbol_name);
-            int i;
-            for(i = 0; i < sym_to_find->cnt; i++)
+            if(sym_to_find->add_value(value))
             {
-                if( sym_to_find->values[i] == value)
-                {
-                    LOG_DEBUG("Duplicate");
-                    break;
-                }
-            }
-            if(i == sym_to_find->cnt)
-            {
-                sym_to_find->values[sym_to_find->cnt] = value;
-
                 LOG_DEBUG("%p => %s", value, symbol_name);
                 elf_info->mem_map->debug_print();
                 LOG_DEBUG("++++++  ++++++ ");
-                if(++sym_to_find->cnt >= MAX_NUM_ADDRS_PER_SYM)
+                if(sym_to_find->full())
                 {
                     break;
                 }
@@ -454,9 +443,8 @@ static bool search_elf_symbol_section_for_sym(const Elf_info_t * elf_info, int s
  * @return True if any found
  *
  */
-static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int symtab_idx, int strtab_idx, Addr2Sym_t * addr_to_find)
+static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int symtab_idx, int strtab_idx, Addr2Sym * addr_to_find)
 {
-    int distance = addr_to_find->distance;
     int num_of_symbols = get_number_of_symbols(elf_info, symtab_idx);
     if(num_of_symbols == 0)
     {
@@ -465,9 +453,6 @@ static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int 
     void * symbols = get_elf_section(elf_info, symtab_idx);
 
     char * symstr = (char *) get_elf_section(elf_info, strtab_idx);
-
-    int bestIdx = -1;
-    MemPtr_t bestValue = NULL;
 
     int i;
     for(i = 0; i < num_of_symbols; i++)
@@ -482,27 +467,15 @@ static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int 
 
         Elf32_Sym * pSym = &((Elf32_Sym *)symbols)[i];
         LOG_DEBUG("%08lx => %s (%i) {%i}", (unsigned long) pSym->st_value, symbol_name, pSym->st_size, pSym->st_shndx);
-        int offset = addr_to_find->value - value;
-        if((offset >= 0) && (offset < distance))
+
+        if(addr_to_find->update(value, symbol_name))
         {
-            distance = offset;
-            bestIdx = i;
-            bestValue = value;
+            LOG_DEBUG("++++++ Best matched %s ++++++ ", symbol_name);
+            LOG_DEBUG("%p => %s", value, symbol_name);
+            elf_info->mem_map->debug_print();
+            LOG_DEBUG("++++++  ++++++ ");
         }
-    }
 
-    if(bestIdx >= 0)
-    {
-        const char * symbol_name = get_symbol_name(elf_info, symbols, bestIdx, symstr);
-
-        LOG_DEBUG("++++++ Best matched %s ++++++ ", symbol_name);
-
-        LOG_DEBUG("%p => %s", bestValue, symbol_name);
-        elf_info->mem_map->debug_print();
-        LOG_DEBUG("++++++  ++++++ ");
-
-        addr_to_find->distance = distance;
-        strncpy(addr_to_find->name, symbol_name, MAX_SYMBOL_NAME_LEN);
     }
     free(symstr);
 }
@@ -739,7 +712,7 @@ static void get_symbol_table_sections(const Elf_info_t * elf_info, bool print_sh
  * @param[in] print_shdr_table If this is the first time this table is read then print it via logging
  *    functions
  */
-static void search_elf_sections_for_symbol(const Elf_info_t * elf_info, Sym2Addr_t * sym_to_find, bool print_shdr_tab)
+static void search_elf_sections_for_symbol(const Elf_info_t * elf_info, Sym2Addr * sym_to_find, bool print_shdr_tab)
 {
     bool found_some = false;
 
@@ -768,7 +741,7 @@ static void search_elf_sections_for_symbol(const Elf_info_t * elf_info, Sym2Addr
  * @param[in] print_shdr_table If this is the first time this table is read then print it via logging
  *    functions
  */
-static void search_elf_sections_for_address(const Elf_info_t * elf_info, Addr2Sym_t * addr_to_find, bool print_shdr_tab)
+static void search_elf_sections_for_address(const Elf_info_t * elf_info, Addr2Sym * addr_to_find, bool print_shdr_tab)
 {
     /* Look through the section header table */
     int symtab_idx[2] = {-1,-1};
@@ -900,7 +873,7 @@ static void open_elf_file(Elf_info_t * elf_info)
  * @param[in] elf_info The this pointer to structure containg elf info
  * @param[in,out] sym_to_find The symbol to find
  */
-static void find_symbol_in_elf(Elf_info_t * elf_info, Sym2Addr_t * sym_to_find)
+static void find_symbol_in_elf(Elf_info_t * elf_info, Sym2Addr * sym_to_find)
 {
     bool just_opened = false;
     if(elf_info->fd < 0)
@@ -914,7 +887,7 @@ static void find_symbol_in_elf(Elf_info_t * elf_info, Sym2Addr_t * sym_to_find)
     }
 }
 
-static void find_closest_symbol_in_elf(Elf_info_t * elf_info, Addr2Sym_t * addr_to_find)
+static void find_closest_symbol_in_elf(Elf_info_t * elf_info, Addr2Sym * addr_to_find)
 {
     bool just_opened = false;
     if(elf_info->fd < 0)
@@ -939,43 +912,6 @@ static void init_elf_info_struct(Elf_info_t * elf_info)
     elf_info->fd = -1;
 }
 
-/**
- * Initialise the Sym2Addr_t structure to have no found values
- *
- * @param[in,out] sym The structure containg symbol name and values
- */
-static void init_symbol_struct(Sym2Addr_t * sym)
-{
-    if(sym == NULL)
-    {
-        LOG_ERROR("Null pointer for Sym2Addr_t");
-        exit(EXIT_FAILURE);
-    }
-
-    const char * symbol = sym->name;
-    memset(sym, 0, sizeof(Sym2Addr_t));
-    sym->name = symbol;
-}
-
-/**
- * Initialise the Addr2Sym_t structure to have no found values
- *
- * @param[in,out] addr The structure containg symbol name and values
- */
-static void init_address_struct(Addr2Sym_t * addr)
-{
-    if(addr == NULL)
-    {
-        LOG_ERROR("Null pointer for Addr2Sym_t");
-        exit(EXIT_FAILURE);
-    }
-
-    MemPtr_t addr_ = addr->value;
-    memset(addr, 0, sizeof(Addr2Sym_t));
-    addr->value = addr_;
-    addr->distance = INT_MAX;
-}
-
 static FILE * open_memory_map(pid_t pid)
 {
     char memory_map[50];
@@ -991,12 +927,12 @@ static FILE * open_memory_map(pid_t pid)
  * @param[in] library Optional library
  * @param[in,out] symbol Structure containg symbol info
  */
-void find_addr_of_symbol(pid_t pid, const char * library, Sym2Addr_t * sym_to_find)
+void find_addr_of_symbol(pid_t pid, const char * library, Sym2Addr * sym_to_find)
 {
     Elf_info_t elf_info;
     init_elf_info_struct(&elf_info);
 
-    init_symbol_struct(sym_to_find);
+    sym_to_find->reset();
 
     FILE * mem_fp = open_memory_map(pid);
     if(mem_fp)
@@ -1034,19 +970,19 @@ void find_addr_of_symbol(pid_t pid, const char * library, Sym2Addr_t * sym_to_fi
 
 
 /**
- * Find the closest symbol to the address ain the Addr2Sym_t and fill
+ * Find the closest symbol to the address ain the Addr2Sym and fill
  * that structure with the matching symbols(s)
  *
  * @param[in] pid The Process to find the symbol in
  * @param[in,out] addr_to_find Structure containg the details of
  *       the match
  */
-void find_closest_symbol(pid_t pid, Addr2Sym_t * addr_to_find)
+void find_closest_symbol(pid_t pid, Addr2Sym * addr_to_find)
 {
     Elf_info_t elf_info;
     init_elf_info_struct(&elf_info);
 
-    init_address_struct(addr_to_find);
+    addr_to_find->reset();
 
     FILE * mem_fp = open_memory_map(pid);
     if(mem_fp)
@@ -1057,7 +993,7 @@ void find_closest_symbol(pid_t pid, Addr2Sym_t * addr_to_find)
             Map_entry * next_map_entry = Map_entry::parse_map_entry(linebuf);
 
             if(!next_map_entry->has_permissions() ||
-                    !next_map_entry->contains(addr_to_find->value))
+                    !next_map_entry->contains(addr_to_find->value()))
             {
                 delete next_map_entry;
                 continue;
@@ -1079,15 +1015,9 @@ void find_closest_symbol(pid_t pid, Addr2Sym_t * addr_to_find)
                 }
             }
             elf_info.mem_map = next_map_entry;
-            int distance = next_map_entry->offset(addr_to_find->value);
-            if(distance < addr_to_find->distance)
-            {
-                /* Symbol, could be the name of the library... */
-                if(next_map_entry->copy_pathname(addr_to_find->name, MAX_SYMBOL_NAME_LEN))
-                {
-                    addr_to_find->distance = distance;
-                }
-            }
+            /* Initially add the library as the symbol */
+            addr_to_find->update(next_map_entry->start_address(), next_map_entry->pathname());
+
             find_closest_symbol_in_elf(&elf_info, addr_to_find);
         }
         fclose(mem_fp);

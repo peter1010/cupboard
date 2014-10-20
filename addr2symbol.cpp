@@ -42,15 +42,14 @@ int main(int argc, char * const argv[])
         return EXIT_FAILURE;
     }
 
-    Addr2Sym_t addr;
     char * endp;
-    addr.value = (MemPtr_t) strtoul(argv[optind], &endp, 0);
+    Addr2Sym addr(strtoul(argv[optind], &endp, 0));
     if(*endp != '\0')
     {
         print_usage();
     }
     find_closest_symbol(tgt_pid, &addr);
 
-    printf("In process %i; %p is close to %s [+%i]\n", tgt_pid, addr.value, addr.name, addr.distance);
+    addr.print(tgt_pid);
     return EXIT_SUCCESS;
 }

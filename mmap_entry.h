@@ -41,7 +41,7 @@ public:
 
     void debug_print() const;
 
-    int offset(MemPtr_t value) {return value - m_start_address; };
+    MemPtr_t start_address() const {return m_start_address; };
 
     MemPtr_t foffset2addr(int foffset) const
         {return m_start_address + foffset - m_offset_into_file; };

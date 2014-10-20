@@ -41,15 +41,10 @@ int main(int argc, char * const argv[])
         return EXIT_FAILURE;
     }
 
-    Sym2Addr_t sym;
-    sym.name = argv[optind];
+    Sym2Addr sym(argv[optind]);
 
     find_addr_of_symbol(tgt_pid, NULL, &sym);
 
-    int i;
-    for(i = 0; i < sym.cnt; i++)
-    {
-        printf("In process %i; %s = %p\n", tgt_pid, sym.name, sym.values[i]);
-    }
+    sym.print(tgt_pid);
     return EXIT_SUCCESS;
 }
