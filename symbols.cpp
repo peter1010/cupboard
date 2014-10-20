@@ -40,27 +40,6 @@ struct Elf_info_s
 
 typedef struct Elf_info_s Elf_info_t;
 
-/**
- * Version of malloc that terminates the program when we run out of memory.
- *
- * @param[in] size The size of memory to allocate
- *
- * @return Pointer to the allocated memory
- */
-static void * xalloc(size_t size)
-{
-    void * mem = malloc(size);
-    if(mem == NULL)
-    {
-        LOG_ERROR("Out of memory");
-        exit(EXIT_FAILURE);
-    }
-    return mem;
-}
-
-#define XSTR(x) STR(x)
-#define STR(x) #x
-#define MAX_PERMISSIONS_CHARS 5
 
 /**
  * Test if the ELF info is for a 32bit Elf file
@@ -116,11 +95,11 @@ static void * get_elf_section(const Elf_info_t * elf_info, int shndx)
         offset = shdr->sh_offset;
 
     }
-    void * section = xalloc(size);
+    uint8_t * section = new uint8_t[size];
     if( pread(elf_info->fd, section, size, offset) != (int) size)
     {
         LOG_ERROR("Failed to read section table");
-        free(section);
+        delete [] section;
         exit(0);
     }
     return section;
@@ -538,11 +517,11 @@ static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int 
 static bool get_elf_section_header_table(Elf_info_t * elf_info)
 {
     const ssize_t size = elf_info->section_entry_size * elf_info->num_of_sections;
-    void * buf = xalloc(size);
+    uint8_t * buf = new uint8_t[size];
     if( pread(elf_info->fd, buf, size, elf_info->e_shoff) != size)
     {
         LOG_ERROR("Failed to Read ELF section header table");
-        free(buf);
+        delete [] buf;
         exit(0);
     }
     elf_info->shdr = static_cast<uint8_t *>(buf);
@@ -551,7 +530,7 @@ static bool get_elf_section_header_table(Elf_info_t * elf_info)
     if( shstrtab == NULL)
     {
         LOG_ERROR("Failed to Read ELF section header table section names");
-        free(buf);
+        delete [] buf;
         elf_info->shdr = NULL;
         exit(0);
     }
@@ -828,7 +807,7 @@ static bool parse_elf_header(Elf_info_t * elf_info)
     }
     if(memcmp(ELFMAG, buf, SELFMAG) != 0)
     {
-        LOG_ERROR("No ELF Magic seen");
+        LOG_ERROR("No ELF Magic seen for '%s'", elf_info->mem_map->pathname());
         return false;
     }
     switch(buf[EI_CLASS])
