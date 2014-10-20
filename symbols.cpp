@@ -18,27 +18,14 @@
 
 #include "symbols.h"
 #include "logging.h"
-
-/**
- * Structure containing a parsed text line from the memory map proc file
- */
-struct Map_entry_s
-{
-    MemPtr_t start_address;
-    MemPtr_t end_address;
-    int permissions;                  /* r/w/x/p */
-    unsigned long offset_into_file;   /* if region mapped from file, the offset into file */
-    char * pathname;                  /* if region mapped from file, the file pathname */
-};
-
-typedef struct Map_entry_s Map_entry_t;
+#include "mmap_entry.h"
 
 /**
  * Information collected as the Elf file associated with Map_entry is parsed
  */
 struct Elf_info_s
 {
-    Map_entry_t * mem_map;
+    Map_entry * mem_map;
     int fd;
 
     int arch_size;
@@ -74,118 +61,6 @@ static void * xalloc(size_t size)
 #define XSTR(x) STR(x)
 #define STR(x) #x
 #define MAX_PERMISSIONS_CHARS 5
-
-/**
- * Parse an entry in the /proc/xxx/map output
- *
- * @param[in] linebuf A line of text from /proc/xxx/maps
- *
- * @return Allocated memory containing the Map_entry structure
- */
-static Map_entry_t * parse_map_entry(const char * linebuf)
-{
-    Map_entry_t * entry = xalloc(sizeof(Map_entry_t));
-
-    memset(entry, 0, sizeof(Map_entry_t));
-    unsigned long start_address = 0;
-    unsigned long end_address = 0;
-    char permissions[MAX_PERMISSIONS_CHARS+1] = {0};
-    unsigned short dev_major;
-    unsigned short dev_minor;
-    unsigned long file_inode;
-    const int num_parsed = sscanf(linebuf, "%lx-%lx %" XSTR(MAX_PERMISSIONS_CHARS) "s %lx %hx:%hx %lu %ms",
-			                   &start_address,
-                                           &end_address,
-                                           permissions,
-                                           &entry->offset_into_file,
-                                           &dev_major,
-                                           &dev_minor,
-                                           &file_inode,
-                                           &entry->pathname);
-    if(num_parsed < 7)
-    {
-        LOG_ERROR("Failed to parse memory map line '%s' (%i)", linebuf, num_parsed);
-        exit(EXIT_FAILURE);
-    }
-
-    entry->start_address = (MemPtr_t) start_address;
-    entry->end_address = (MemPtr_t) end_address;
-    entry->permissions = 0;
-
-    char * p = permissions;
-    for(; *p; p++)
-    {
-        switch(*p)
-        {
-            case 'r':
-                entry->permissions |= PROT_READ;
-                break;
-
-            case 'w':
-                entry->permissions |= PROT_WRITE;
-                break;
-
-            case 'x':
-                entry->permissions |= PROT_EXEC;
-                break;
-
-            case '-':
-            case 'p':
-            case 's':
-                break;
-
-            default:
-                LOG_ERROR("Invalid character '%c' found in memory map entry '%s'", *p, linebuf);
-                exit(EXIT_FAILURE);
-                break;
-        }
-    }
-    LOG_DEBUG("%8p-%8p %s %08lx %s",
-			     entry->start_address,
-                             entry->end_address,
-                             permissions,
-                             entry->offset_into_file,
-                             entry->pathname);
-    return entry;
-}
-
-static void free_map_entry(Map_entry_t * entry)
-{
-    free(entry->pathname);
-    free(entry);
-}
-
-/**
- * Does the to_find library match the one we have found.
- *
- * @param[in] to_find The string to find
- * @param[in] poss A possible library to test against
- *
- * @return true if match
- */
-static bool match_library(const char * to_find, const char * poss)
-{
-    if((poss == NULL) || (*poss == '\0'))
-    {
-        return false;
-    }
-    if(to_find == NULL)
-    {
-        return true;
-    }
-
-    const char * start = strrchr(poss, '/');
-    start = (start == NULL) ? poss : &start[1];
-    const char * end = strchr(start, '-');
-    const unsigned len = (end == NULL) ? strlen(start) : (unsigned)(end-start);
-
-    bool success = (strncmp(start, to_find, len) == 0) ? true : false;
-    if(!success)
-    {
-        LOG_DEBUG("ignoring '%s' != '%s'", to_find, poss);
-    }
-    return success;
-}
 
 /**
  * Test if the ELF info is for a 32bit Elf file
@@ -433,14 +308,14 @@ static bool get_symbol_value(const Elf_info_t * elf_info, const void * symbols, 
     switch(get_symbol_type(elf_info, symbols, idx))
     {
         case STT_FUNC:
-            if((elf_info->mem_map->permissions & PROT_EXEC) == 0)
+            if(!elf_info->mem_map->is_executable())
             {
                 return false;
             }
             break;
 
         case STT_OBJECT:
-            if((elf_info->mem_map->permissions & (PROT_WRITE | PROT_READ)) == 0)
+            if(!elf_info->mem_map->is_accessable())
             {
                 return false;
             }
@@ -462,7 +337,7 @@ static bool get_symbol_value(const Elf_info_t * elf_info, const void * symbols, 
     {
         value = get_raw_symbol_value(elf_info, symbols, idx);
         /* Is this is not mapped into the memory map entry we are searching */
-        if((value >= elf_info->mem_map->end_address) || (value < elf_info->mem_map->start_address))
+        if(!elf_info->mem_map->contains(value))
         {
             return false;
         }
@@ -478,18 +353,16 @@ static bool get_symbol_value(const Elf_info_t * elf_info, const void * symbols, 
     {
         unsigned sh_offset = get_section_offset(elf_info, st_shndx);
 
+        MemPtr_t temp = elf_info->mem_map->foffset2addr(sh_offset);
+
         /* Is this section mapped into the memory map entry we are searching */
-        if((sh_offset < elf_info->mem_map->offset_into_file)
-                              || (sh_offset >= elf_info->mem_map->offset_into_file
-                                    + (elf_info->mem_map->end_address - elf_info->mem_map->start_address)))
+        if(!elf_info->mem_map->contains(temp))
         {
             return false;
         }
         unsigned sh_addr = get_section_address(elf_info, st_shndx);
 
-        value = (MemPtr_t) get_raw_symbol_value(elf_info, symbols, idx)
-                            + (unsigned long) elf_info->mem_map->start_address
-                            - sh_addr - elf_info->mem_map->offset_into_file + sh_offset;
+        value = temp + (unsigned) get_raw_symbol_value(elf_info, symbols, idx) - sh_addr;
 //        LOG_DEBUG("ELF Shdr, %08lx %08lx-%08lx", (unsigned long) sh_addr,
 //                                                 (unsigned long) sh_offset,
 //                                                 (unsigned long) sh_offset+shdr->sh_size);
@@ -578,8 +451,7 @@ static bool search_elf_symbol_section_for_sym(const Elf_info_t * elf_info, int s
                 sym_to_find->values[sym_to_find->cnt] = value;
 
                 LOG_DEBUG("%p => %s", value, symbol_name);
-                LOG_DEBUG("Mem_map => %8p - %8p", elf_info->mem_map->start_address, elf_info->mem_map->end_address);
-                LOG_DEBUG("offset into file => %08lx", elf_info->mem_map->offset_into_file);
+                elf_info->mem_map->debug_print();
                 LOG_DEBUG("++++++  ++++++ ");
                 if(++sym_to_find->cnt >= MAX_NUM_ADDRS_PER_SYM)
                 {
@@ -647,8 +519,7 @@ static void search_elf_symbol_section_for_addr(const Elf_info_t * elf_info, int 
         LOG_DEBUG("++++++ Best matched %s ++++++ ", symbol_name);
 
         LOG_DEBUG("%p => %s", bestValue, symbol_name);
-        LOG_DEBUG("Mem_map => %8p - %8p", elf_info->mem_map->start_address, elf_info->mem_map->end_address);
-        LOG_DEBUG("offset into file => %08lx", elf_info->mem_map->offset_into_file);
+        elf_info->mem_map->debug_print();
         LOG_DEBUG("++++++  ++++++ ");
 
         addr_to_find->distance = distance;
@@ -674,7 +545,7 @@ static bool get_elf_section_header_table(Elf_info_t * elf_info)
         free(buf);
         exit(0);
     }
-    elf_info->shdr = buf;
+    elf_info->shdr = static_cast<uint8_t *>(buf);
 
     char * shstrtab = (char *) get_elf_section(elf_info, elf_info->e_shstrndx);
     if( shstrtab == NULL)
@@ -685,7 +556,7 @@ static bool get_elf_section_header_table(Elf_info_t * elf_info)
         exit(0);
     }
 
-    elf_info->shdr = buf;
+    elf_info->shdr = static_cast<uint8_t *>(buf);
     elf_info->shstrtab = shstrtab;
 
     return true;
@@ -1029,17 +900,13 @@ static void free_elf_info_struct(Elf_info_t * elf_info)
 static void open_elf_file(Elf_info_t * elf_info)
 {
     bool success = false;
-    const char * pathname = elf_info->mem_map->pathname;
-    if(pathname)
+    const int fd = elf_info->mem_map->open_elf();
+    if( fd  > 0)
     {
-        const int fd = open(pathname, O_RDONLY);
-        if( fd  > 0)
+        elf_info->fd = fd;
+        if(parse_elf_header(elf_info))
         {
-            elf_info->fd = fd;
-            if(parse_elf_header(elf_info))
-            {
-                success = get_elf_section_header_table(elf_info);
-            }
+            success = get_elf_section_header_table(elf_info);
         }
     }
     if(!success)
@@ -1137,22 +1004,6 @@ static FILE * open_memory_map(pid_t pid)
     return fopen(memory_map, "r");
 }
 
-static bool same_pathname(const char * pathname1, const char * pathname2)
-{
-    if(pathname1)
-    {
-        if(pathname2)
-        {
-            return strcmp(pathname1, pathname2) == 0 ? true : false;
-        }
-        return false;
-    }
-    else
-    {
-        return pathname2 == NULL ? true : false;
-    }
-}
-
 /**
  * Find the symbol in the process by looking up in the ELF files that
  * make up the process memory map space
@@ -1174,23 +1025,23 @@ void find_addr_of_symbol(pid_t pid, const char * library, Sym2Addr_t * sym_to_fi
         char linebuf[256];
         while(fgets(linebuf, sizeof(linebuf), mem_fp) != NULL)
         {
-            Map_entry_t * next_map_entry = parse_map_entry(linebuf);
+            Map_entry * next_map_entry = Map_entry::parse_map_entry(linebuf);
 
-            if((next_map_entry->permissions == 0) || !match_library(library, next_map_entry->pathname))
+            if(!next_map_entry->has_permissions() || !next_map_entry->match_library(library))
             {
-                free_map_entry(next_map_entry);
+                delete next_map_entry;
                 continue;
             }
             if(elf_info.mem_map)     /* Is there a previous map_entry? */
             {
                 /* But it's a different ELF file */
-                if(!same_pathname(elf_info.mem_map->pathname, next_map_entry->pathname))
+                if(!elf_info.mem_map->same_pathname(next_map_entry))
                 {
                     free_elf_info_struct(&elf_info);
                 }
                 else
                 {
-                    free_map_entry(elf_info.mem_map);
+                    delete elf_info.mem_map;
                     elf_info.mem_map = NULL;
                 }
             }
@@ -1224,39 +1075,37 @@ void find_closest_symbol(pid_t pid, Addr2Sym_t * addr_to_find)
         char linebuf[256];
         while(fgets(linebuf, sizeof(linebuf), mem_fp) != NULL)
         {
-            Map_entry_t * next_map_entry = parse_map_entry(linebuf);
+            Map_entry * next_map_entry = Map_entry::parse_map_entry(linebuf);
 
-            if((next_map_entry->permissions == 0) ||
-                    (addr_to_find->value < next_map_entry->start_address)
-                                 || (addr_to_find->value >= next_map_entry->end_address))
+            if(!next_map_entry->has_permissions() ||
+                    !next_map_entry->contains(addr_to_find->value))
             {
-                free_map_entry(next_map_entry);
+                delete next_map_entry;
                 continue;
             }
 
-            LOG_DEBUG("Address in %s", next_map_entry->pathname);
+            LOG_DEBUG("Address in %s", next_map_entry->pathname());
 
             if(elf_info.mem_map)     /* Is there a previous map_entry? */
             {
                 /* But it's a different ELF file */
-                if(!same_pathname(elf_info.mem_map->pathname, next_map_entry->pathname))
+                if(!elf_info.mem_map->same_pathname(next_map_entry))
                 {
                     free_elf_info_struct(&elf_info);
                 }
                 else
                 {
-                    free_map_entry(elf_info.mem_map);
+                    delete elf_info.mem_map;
                     elf_info.mem_map = NULL;
                 }
             }
             elf_info.mem_map = next_map_entry;
-            int distance = addr_to_find->value - next_map_entry->start_address;
+            int distance = next_map_entry->offset(addr_to_find->value);
             if(distance < addr_to_find->distance)
             {
-                if(next_map_entry->pathname)
+                /* Symbol, could be the name of the library... */
+                if(next_map_entry->copy_pathname(addr_to_find->name, MAX_SYMBOL_NAME_LEN))
                 {
-                    /* Symbol, could be the name of the library... */
-                    strncpy(addr_to_find->name, next_map_entry->pathname, MAX_SYMBOL_NAME_LEN);
                     addr_to_find->distance = distance;
                 }
             }

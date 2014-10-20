@@ -3,6 +3,11 @@
 
 #include <stdbool.h>
 
+/* If compiled using C++, use C linkage */
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * Some Logging code
  */
@@ -55,5 +60,10 @@ extern void log_errno(
     void * hnd,
     const char * fmt,
     ...) __attribute__((format (printf, 2, 3)));
+
+/* If compiled using C++, use C linkage */
+#ifdef __cplusplus
+}
+#endif
 
 #endif

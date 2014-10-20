@@ -44,7 +44,7 @@ int main(int argc, char * const argv[])
 
     Addr2Sym_t addr;
     char * endp;
-    addr.value = (void *) strtoul(argv[optind], &endp, 0);
+    addr.value = (MemPtr_t) strtoul(argv[optind], &endp, 0);
     if(*endp != '\0')
     {
         print_usage();

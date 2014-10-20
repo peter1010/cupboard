@@ -1,20 +1,30 @@
 CFLAGS=-Wall -O3 -Wextra
 
 CC=gcc -c
+CXX=gcc -c
+
 MAKEDEPEND=gcc -M $(CPPFLAGS)
 LINK=gcc $(LDFLAGS)
 
-S2A_OBJS= symbols.o logging.o symbol2addr.o
-A2S_OBJS= symbols.o logging.o addr2symbol.o
+S2A_OBJS= symbols.o logging.o symbol2addr.o mmap_entry.o
+A2S_OBJS= symbols.o logging.o addr2symbol.o mmap_entry.o
 
 .PHONY: all
 all: symbol2addr addr2symbol
 
 symbol2addr: $(S2A_OBJS)
-	$(LINK) $(S2A_OBJS) -o $@
+	$(LINK) $(S2A_OBJS) -o $@ -lstdc++
 
 addr2symbol: $(A2S_OBJS)
-	$(LINK) $(A2S_OBJS) -o $@
+	$(LINK) $(A2S_OBJS) -o $@ -lstdc++
+
+%.o : %.cpp
+	$(CXX) $(CPPFLAGS) -MMD $(CFLAGS) -o $@ $<
+	@cp $*.d $*.P
+	@sed -e 's/#.*//' -e 's/^[^:]*: *//' -e 's/ *\\$$//' -e '/^$$/ d' -e 's/$$/ :/' < $*.d >> $*.P
+	@rm -f $*.d
+	@mv $*.P $*.d
+
 
 %.o : %.c
 	$(CC) $(CPPFLAGS) -MMD $(CFLAGS) -o $@ $<
