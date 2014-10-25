@@ -7,13 +7,8 @@
  */
 
 #include <stdio.h>
-#include <elf.h>
-#include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
-#include <assert.h>
-#include <stdbool.h>
-#include <limits.h>
 #include <sys/mman.h>
 
 #include "symbols.h"
@@ -59,8 +54,8 @@ Map_entry * Map_entry::parse_map_entry(const char * linebuf)
         exit(EXIT_FAILURE);
     }
 
-    entry->m_start_address = (MemPtr_t) start_address;
-    entry->m_end_address = (MemPtr_t) end_address;
+    entry->m_start_address = reinterpret_cast<MemPtr_t>(start_address);
+    entry->m_end_address = reinterpret_cast<MemPtr_t>(end_address);
     entry->m_permissions = 0;
 
     char * p = permissions;
@@ -162,7 +157,7 @@ bool Map_entry::match_library(const char * to_find) const
     const char * start = strrchr(m_pathname, '/');
     start = (start == NULL) ? m_pathname : &start[1];
     const char * end = strchr(start, '-');
-    const unsigned len = (end == NULL) ? strlen(start) : (unsigned)(end-start);
+    const unsigned len = (end == NULL) ? strlen(start) : static_cast<unsigned>(end-start);
 
     bool success = (strncmp(start, to_find, len) == 0) ? true : false;
     if(!success)

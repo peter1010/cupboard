@@ -1,20 +1,9 @@
 /**
- * Some of the ideas and concepts are borrowed from reading code written
- * by Victor Zandy <zandy[at]cs.wisc.edu> for getting values of symbols
- * from inspecting the /proc/xxx/maps virtual file and contents of
- * refered ELF files. To better understand ELF files I felt the need to
- * implement my own version.
  */
 
 #include <stdio.h>
-#include <elf.h>
-#include <unistd.h>
-#include <fcntl.h>
 #include <string.h>
-#include <assert.h>
-#include <stdbool.h>
 #include <limits.h>
-#include <sys/mman.h>
 
 #include "symbols.h"
 #include "logging.h"

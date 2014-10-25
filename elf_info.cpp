@@ -19,7 +19,6 @@
 #include "symbols.h"
 #include "logging.h"
 #include "mmap_entry.h"
-#include "elf_info.h"
 
 /**
  * Information collected as the Elf file associated with Map_entry is parsed

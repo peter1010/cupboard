@@ -1,37 +1,27 @@
 /**
- * Some of the ideas and concepts are borrowed from reading code written
- * by Victor Zandy <zandy[at]cs.wisc.edu> for getting values of symbols
- * from inspecting the /proc/xxx/maps virtual file and contents of
- * refered ELF files. To better understand ELF files I felt the need to
- * implement my own version.
+ *
  */
 
 #include <stdio.h>
-#include <elf.h>
-#include <unistd.h>
-#include <fcntl.h>
 #include <string.h>
-#include <assert.h>
-#include <stdbool.h>
-#include <limits.h>
-#include <sys/mman.h>
 
 #include "symbols.h"
 #include "logging.h"
 
+/**
+ * Constructor
+ *
+ * @param[in] The name of the symbol
+ */
 Sym2Addr::Sym2Addr(const char * name)
 {
     m_name = name;
+    m_cnt = 0;
 }
 
-/**
- * Initialise the Sym2Addr structure to have no found values
- */
 void Sym2Addr::reset()
 {
-    const char * symbol = m_name;
-    memset(this, 0, sizeof(Sym2Addr));
-    m_name = symbol;
+    m_cnt = 0;
 }
 
 bool Sym2Addr::match(const char * symbol_name) const
