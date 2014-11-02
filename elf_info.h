@@ -26,34 +26,69 @@ class Map_entry;
 class Elf_info
 {
 public:
-    virtual bool is_elf_32bit() const = 0;
-    virtual bool is_elf_64bit() const = 0;
+    virtual void * get_elf_section(int shndx) const = 0;
+    virtual unsigned get_symbol_type(const void * symbols, int idx) const = 0;
+    virtual unsigned get_section_address(int shndx) const = 0;
+    virtual int get_number_of_symbols(int symtab_idx) const = 0;
+    virtual unsigned get_section_offset(int shndx) const = 0;
+    virtual unsigned get_symbol_section(const void * symbols, int idx) const = 0;
+    virtual MemPtr_t get_raw_symbol_value(const void * symbols, int idx) const = 0;
+    virtual const char * get_symbol_name(const void * symbols, int idx, const char * symstr) const = 0;
+    virtual char * get_section_name(int shndx) const = 0;
+    virtual unsigned get_section_type(int shndx) const = 0;
 
-    Map_entry * mem_map;
-    int fd;
+    static Elf_info * create(Map_entry * map);
+    void switch_map(Map_entry * map);
 
-    int arch_size;
-    unsigned int num_of_sections;
-    unsigned int section_entry_size;
-    unsigned int e_shoff;
-    unsigned int e_shstrndx;
+    Elf_info();
+    virtual ~Elf_info();
 
-    uint8_t * shdr;     /* Elf section header table */
-    char * shstrtab;
+    Map_entry * m_mem_map;
+    int m_fd;
+
+    unsigned int m_num_of_sections;
+    unsigned int m_section_entry_size;
+    unsigned int m_e_shoff;
+    unsigned int m_e_shstrndx;
+
+    uint8_t * m_shdr;     /* Elf section header table */
+    char * m_shstrtab;
 };
+
 
 class Elf32_info : Elf_info
 {
 public:
-    virtual bool is_elf_32bit() const {return true;};
-    virtual bool is_elf_64bit() const {return false;};
+    virtual void * get_elf_section(int shndx) const;
+    virtual unsigned get_symbol_type(const void * symbols, int idx) const;
+    virtual unsigned get_section_address(int shndx) const;
+    virtual int get_number_of_symbols(int symtab_idx) const;
+    virtual unsigned get_section_offset(int shndx) const;
+    virtual unsigned get_symbol_section(const void * symbols, int idx) const;
+    virtual MemPtr_t get_raw_symbol_value(const void * symbols, int idx) const;
+    virtual const char * get_symbol_name(const void * symbols, int idx, const char * symstr) const;
+    virtual char * get_section_name(int shndx) const;
+    virtual unsigned get_section_type(int shndx) const;
+    
+    virtual ~Elf32_info();
 };
+
 
 class Elf64_info : Elf_info
 {
 public:
-    virtual bool is_elf_32bit() const {return true;};
-    virtual bool is_elf_64bit() const {return false;};
+    virtual void * get_elf_section(int shndx) const;
+    virtual unsigned get_symbol_type(const void * symbols, int idx) const;
+    virtual unsigned get_section_address(int shndx) const;
+    virtual int get_number_of_symbols(int symtab_idx) const;
+    virtual unsigned get_section_offset(int shndx) const;
+    virtual unsigned get_symbol_section(const void * symbols, int idx) const;
+    virtual MemPtr_t get_raw_symbol_value(const void * symbols, int idx) const;
+    virtual const char * get_symbol_name(const void * symbols, int idx, const char * symstr) const;
+    virtual char * get_section_name(int shndx) const;
+    virtual unsigned get_section_type(int shndx) const;
+
+    virtual ~Elf64_info();
 };
 
 #endif
