@@ -6,8 +6,8 @@ CXX=gcc -c
 MAKEDEPEND=gcc -M $(CPPFLAGS)
 LINK=gcc $(LDFLAGS)
 
-S2A_OBJS= symbols.o logging.o symbol2addr.o mmap_entry.o elf_info.o addr2sym.o sym2addr.o
-A2S_OBJS= symbols.o logging.o addr2symbol.o mmap_entry.o elf_info.o sym2addr.o addr2sym.o
+S2A_OBJS= symbols.o logging.o symbol2addr.o mmap_entry.o elf_info.o elf32_info.o elf64_info.o addr2sym.o sym2addr.o
+A2S_OBJS= symbols.o logging.o addr2symbol.o mmap_entry.o elf_info.o elf32_info.o elf64_info.o sym2addr.o addr2sym.o
 
 .PHONY: all
 all: symbol2addr addr2symbol

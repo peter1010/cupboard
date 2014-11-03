@@ -1,24 +1,102 @@
 /**
- * Some of the ideas and concepts are borrowed from reading code written
- * by Victor Zandy <zandy[at]cs.wisc.edu> for getting values of symbols
- * from inspecting the /proc/xxx/maps virtual file and contents of
- * refered ELF files. To better understand ELF files I felt the need to
- * implement my own version.
  */
 
-#include <stdio.h>
-#include <elf.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <string.h>
-#include <assert.h>
-#include <stdbool.h>
-#include <limits.h>
 #include <sys/mman.h>
 
-#include "symbols.h"
+#include <stdint.h>
+
 #include "logging.h"
 #include "elf_info.h"
+#include "elf32_info.h"
+#include "elf64_info.h"
+#include "mmap_entry.h"
+
+/**
+ * Debug function that converts a section headr type to a string
+ *
+ * @param[in] sh_type Section header type
+ *
+ * @return Pointer to const string
+ */
+static const char * shtype2str(int sh_type)
+{
+    const char * retval = "UNKNOWN";
+    switch(sh_type)
+    {
+        case SHT_NULL:           /* Section header table entry unused */
+            retval = "NULL";
+            break;
+
+        case SHT_PROGBITS:      /* Program data */
+            retval = "PROGBITS";
+            break;
+
+        case SHT_SYMTAB:        /* Symbol table */
+            retval = "SYMTAB";
+            break;
+
+        case SHT_STRTAB:        /* String table */
+            retval = "STRTAB";
+            break;
+
+        case SHT_HASH:	    /* Symbol hash table */
+            retval = "HASH";
+            break;
+
+        case SHT_NOTE:          /* Notes */
+            retval = "NOTE";
+            break;
+
+        case SHT_NOBITS:        /* Program space with no data (bss) */
+            retval = "NOBITS";
+            break;
+
+        case SHT_DYNSYM:        /* Dynamic linker symbol table (subset of symbol table) */
+            retval = "DYNSYM";
+            break;
+
+        case SHT_REL:           /* Relocation entries, no addends */
+            retval = "RELOC";
+            break;
+
+        case SHT_INIT_ARRAY:    /* Array of constructors */
+            retval = "INIT_ARRAY";
+            break;
+
+        case SHT_FINI_ARRAY:   /* Array of destructors */
+            retval = "FINI_ARRAY";
+            break;
+
+        case SHT_DYNAMIC:      /* Dynamic linking information */
+            retval = "DYNAMIC";
+            break;
+
+        case SHT_GNU_HASH:     /* GNU-style hash table.  */
+            retval = "GNU_HASH";
+            break;
+
+        case SHT_GNU_verdef:   /* Version definition section.  */
+            retval = "GNU_verdef";
+            break;
+
+        case SHT_GNU_versym:   /* Version symbol table.  */
+            retval = "GNU_versym";
+            break;
+
+        case SHT_GNU_verneed:  /* Version needs section.  */
+            retval = "GNU_verneed";
+            break;
+
+        default:
+//            LOG_ERROR("Unknown sh_type %i(%x)", sh_type, sh_type);
+            retval = "unknown";
+            break;
+    }
+    return retval;
+}
+
 
 /**
  * Initialse the Elf_into_t structure
@@ -30,6 +108,7 @@ Elf_info::Elf_info() :
     m_section_entry_size(0), m_e_shoff(0), m_e_shstrndx(0),
     m_shdr(0), m_shstrtab(0)
 {
+    LOG_DEBUG("Elf_info() called");
 }
 
 /**
@@ -40,7 +119,7 @@ Elf_info::Elf_info() :
  *
  * @return True if this indeed is an Elf file
  */
-static Elf_info * parse_elf_header(int fd)
+static Elf_info * parse_elf_header(int fd, Map_entry * mem_map)
 {
     uint8_t buf[sizeof(Elf64_Ehdr)];
     Elf_info * retVal = NULL;
@@ -52,7 +131,7 @@ static Elf_info * parse_elf_header(int fd)
     }
     if(memcmp(ELFMAG, buf, SELFMAG) != 0)
     {
-        LOG_ERROR("No ELF Magic seen for '%s'", elf_info->m_mem_map->pathname());
+        LOG_ERROR("No ELF Magic seen for '%s'", mem_map->pathname());
         return retVal;
     }
     switch(buf[EI_CLASS])
@@ -63,11 +142,7 @@ static Elf_info * parse_elf_header(int fd)
 
                 if((sizeof(Elf32_Ehdr) <= ehdr->e_ehsize) && (sizeof(Elf32_Ehdr) <= num))
                 {
-                    retVal = new Elf32_info;
-                    retVal->m_num_of_sections = ehdr->e_shnum;
-                    retVal->m_section_entry_size = ehdr->e_shentsize;
-                    retVal->m_e_shoff = ehdr->e_shoff;
-                    retVal->m_e_shstrndx = ehdr->e_shstrndx;
+                    retVal = new Elf32_info(ehdr);
                 }
             }
             break;
@@ -77,11 +152,7 @@ static Elf_info * parse_elf_header(int fd)
 
                 if((sizeof(Elf64_Ehdr) <= ehdr->e_ehsize) && (sizeof(Elf64_Ehdr) <= num))
                 {
-                    retVal = new Elf64_info:
-                    retVal->m_num_of_sections = ehdr->e_shnum;
-                    retVal->m_section_entry_size = ehdr->e_shentsize;
-                    retVal->m_e_shoff = ehdr->e_shoff;
-                    retVal->m_e_shstrndx = ehdr->e_shstrndx;
+                    retVal = new Elf64_info(ehdr);
                 }
             }
             break;
@@ -100,18 +171,22 @@ Elf_info * Elf_info::create(Map_entry * map)
     const int fd = map->open_elf();
     if(fd  > 0)
     {
-        elf_info = parse_elf_header(fd);
+        elf_info = parse_elf_header(fd, map);
         if(elf_info)
         {
             elf_info->m_fd = fd;
-            if(!get_elf_section_header_table(elf_info))
-            {
-                delete elf_info;
-                elf_info = NULL;
-            }
+        }
+        else
+        {
+            close(fd);
         }
     }
     return elf_info;
+}
+
+void Elf_info::switch_map(Map_entry * map)
+{
+    m_mem_map = map;
 }
 
 /**
@@ -133,331 +208,70 @@ Elf_info::~Elf_info()
     m_shstrtab = NULL;
 }
 
-
 /**
- * Get contents of elf section
+ * Get section header from elf file
  *
- * @param[in] shndx The index in section header of the section to get
- *
- * @return Section contents in a malloced memory block
+ * @return True on success
  */
-void * Elf32_info::get_elf_section(int shndx) const
+bool Elf_info::get_elf_section_header_table()
 {
-    uint8_t * p = &m_shdr[shndx * m_section_entry_size];
-    const Elf32_Shdr * shdr = reinterpret_cast<const Elf32_Shdr *>(p);
-    const size_t size = shdr->sh_size;
-    const unsigned long offset = shdr->sh_offset;
-
-    uint8_t * section = new uint8_t[size];
-    if( pread(m_fd, section, size, offset) != (int) size)
+    const ssize_t size = m_section_entry_size * m_num_of_sections;
+    uint8_t * buf = new uint8_t[size];
+    if( pread(m_fd, buf, size, m_e_shoff) != size)
     {
-        LOG_ERROR("Failed to read section table");
-        delete [] section;
+        LOG_ERROR("Failed to Read ELF section header table");
+        delete [] buf;
         exit(0);
     }
-    return section;
-}
+    m_shdr = static_cast<uint8_t *>(buf);
 
-/**
- * Get contents of elf section
- *
- * @param[in] shndx The index in section header of the section to get
- *
- * @return Section contents in a malloced memory block
- */
-void * Elf64_info::get_elf_section(int shndx) const
-{
-    uint8_t * p = &m_shdr[shndx * m_section_entry_size];
-    const Elf64_Shdr * shdr = reinterpret_cast<const Elf64_Shdr *>(p);
-    const size_t size = shdr->sh_size;
-    const unsigned long offset = shdr->sh_offset;
-
-    uint8_t * section = new uint8_t[size];
-    if( pread(m_fd, section, size, offset) != (int) size)
+    char * shstrtab = static_cast<char *>(get_elf_section(m_e_shstrndx));
+    if( shstrtab == NULL)
     {
-        LOG_ERROR("Failed to read section table");
-        delete [] section;
+        LOG_ERROR("Failed to Read ELF section header table section names");
+        delete [] buf;
+        m_shdr = NULL;
         exit(0);
     }
-    return section;
+
+    m_shdr = static_cast<uint8_t *>(buf);
+    m_shstrtab = shstrtab;
+    return true;
 }
 
 /**
- * Get the symbol type value for the symbol specified by the
- * index
+ * Get the index of table and string tables in the section header table
  *
- * @param[in] symbols Pointer to section containing the symbols
- * @param[in] idx The index in section header of the section to get
+ * @param[in] print_shdr_tab Print the section header info
+ * @param[in] _typ The table type
  *
- * @return the type
+ * @return The index of in the section table
  */
-unsigned Elf32_info::get_symbol_type(const void * symbols, int idx) const
+int Elf_info::get_section_idx(unsigned typ_to_find, bool print_shdr_tab) const
 {
-    const Elf32_Sym * pSym = &((const Elf32_Sym *)symbols)[idx];
-    return ELF32_ST_TYPE(pSym->st_info);
-}
+    int retVal = -1;
 
-/**
- * Get the symbol type value for the symbol specified by the
- * index
- *
- * @param[in] symbols Pointer to section containing the symbols
- * @param[in] idx The index in section header of the section to get
- *
- * @return the type
- */
-unsigned Elf64_info::get_symbol_type(const void * symbols, int idx) const
-{
-    const Elf64_Sym * pSym = &((const Elf64_Sym *)symbols)[idx];
-    return ELF64_ST_TYPE(pSym->st_info);
-}
+    /* Look through the section header table */
+    unsigned idx = 0;
+    for(; idx < m_num_of_sections; idx++)
+    {
+        char * section_name = get_section_name(idx);
 
-/**
- * Get the section address value for the section sprcified by the
- * index
- *
- * @param[in] shndx The index in section header of the section to get
- *
- * @return the address
- */
-unsigned Elf32_info::get_section_address(int shndx) const
-{
-    uint8_t * p = &m_shdr[shndx * m_section_entry_size];
-    const Elf32_Shdr * shdr = (const Elf32_Shdr *)p;
-    return shdr->sh_addr;
-}
+        unsigned _typ = get_section_type(idx);
 
-/**
- * Get the section address value for the section sprcified by the
- * index
- *
- * @param[in] shndx The index in section header of the section to get
- *
- * @return the address
- */
-unsigned Elf64_info::get_section_address(int shndx) const
-{
-    uint8_t * p = &m_shdr[shndx * m_section_entry_size];
-    const Elf64_Shdr * shdr = reinterpret_cast<const Elf64_Shdr *>(p);
-    return shdr->sh_addr;
-}
-
-/**
- * Get the number of symbols in symbol table
- *
- * @param[in] symtab_idx The index in the Section header table of symbol table in question
- *
- * @return The number of symbols
- */
-int Elf32_info::get_number_of_symbols(int symtab_idx) const
-{
-    uint8_t * p = &m_shdr[symtab_idx * m_section_entry_size];
-    const Elf32_Shdr * symtab = reinterpret_cast<const Elf32_Shdr *>(p);
-    const unsigned size = symtab->sh_size;
-    const unsigned ele_size = symtab->sh_entsize;
-    assert(sizeof(Elf32_Sym) <= ele_size);
-    const int num_of_symbols = size / ele_size;
-    LOG_DEBUG("Number of symbols is %i", num_of_symbols);
-    return num_of_symbols;
-}
-
-/**
- * Get the number of symbols in symbol table
- *
- * @param[in] symtab_idx The index in the Section header table of symbol table in question
- *
- * @return The number of symbols
- */
-int Elf64_info::get_number_of_symbols(int symtab_idx) const
-{
-    uint8_t * p = &m_shdr[symtab_idx * m_section_entry_size];
-    const Elf64_Shdr * symtab = reinterpret_cast<const Elf64_Shdr *>(p);
-    const unsigned size = symtab->sh_size;
-    const unsigned ele_size = symtab->sh_entsize;
-    assert(sizeof(Elf64_Sym) <= ele_size);
-    const int num_of_symbols = size / ele_size;
-    LOG_DEBUG("Number of symbols is %i", num_of_symbols);
-    return num_of_symbols;
-}
-
-/**
- * Get the section offset value for the section sprcified by the
- * index
- *
- * @param[in] shndx The index in section header of the section to get
- *
- * @return the offset
- */
-unsigned Elf32_info::get_section_offset(int shndx) const
-{
-    uint8_t * p = &m_shdr[shndx * m_section_entry_size];
-    const Elf32_Shdr * shdr = reinterpret_cast<const Elf32_Shdr *>(p);
-    return shdr->sh_offset;
-}
-
-/**
- * Get the section offset value for the section sprcified by the
- * index
- *
- * @param[in] shndx The index in section header of the section to get
- *
- * @return the offset
- */
-unsigned Elf64_info::get_section_offset(int shndx) const
-{
-    uint8_t * p = &m_shdr[shndx * m_section_entry_size];
-    const Elf64_Shdr * shdr = reinterpret_cast<const Elf64_Shdr *>(p);
-    return shdr->sh_offset;
-}
-
-/**
- * Get the symbol section value for the symbol specified by the
- * index
- *
- * @param[in] symbols Pointer to section containing the symbols
- * @param[in] idx The index in section header of the section to get
- *
- * @return the section index
- */
-unsigned Elf32_info::get_symbol_section(const void * symbols, int idx) const
-{
-    const Elf32_Sym * pSym = &((const Elf32_Sym *)symbols)[idx];
-    return pSym->st_shndx;
-}
-
-/**
- * Get the symbol section value for the symbol specified by the
- * index
- *
- * @param[in] symbols Pointer to section containing the symbols
- * @param[in] idx The index in section header of the section to get
- *
- * @return the section index
- */
-unsigned Elf64_info::get_symbol_section(const void * symbols, int idx) const
-{
-    const Elf64_Sym * pSym = &((const Elf64_Sym *)symbols)[idx];
-    return pSym->st_shndx;
-}
-
-/**
- * Get the symbol value for the symbol specified by the
- * index
- *
- * @param[in] symbols Pointer to section containing the symbols
- * @param[in] idx The index in section header of the section to get
- *
- * @return the section index
- */
-MemPtr_t Elf32_info::get_raw_symbol_value(const void * symbols, int idx) const
-{
-    const Elf32_Sym * pSym = &((const Elf32_Sym *)symbols)[idx];
-    return (MemPtr_t) (pSym->st_value);
-}
-
-/**
- * Get the symbol value for the symbol specified by the
- * index
- *
- * @param[in] symbols Pointer to section containing the symbols
- * @param[in] idx The index in section header of the section to get
- *
- * @return the section index
- */
-MemPtr_t Elf64_info::get_raw_symbol_value(const void * symbols, int idx) const
-{
-    const Elf64_Sym * pSym = &((const Elf64_Sym *)symbols)[idx];
-    return (MemPtr_t) (pSym->st_value);
-}
-
-/**
- * Get the name of the symbol
- *
- * @param[in] symbols Pointer to section containing the symbols
- * @param[in] idx The index in section header of the section to get
- * @param[in] symstr The string table
- *
- * @return The symbol name
- */
-const char * Elf32_info::get_symbol_name(const void * symbols, int idx, const char * symstr) const
-{
-    const Elf32_Sym * pSym = &((const Elf32_Sym *)symbols)[idx];
-    const int name_idx = pSym->st_name;
-    return &(symstr[name_idx]);
-}
-
-/**
- * Get the name of the symbol
- *
- * @param[in] symbols Pointer to section containing the symbols
- * @param[in] idx The index in section header of the section to get
- * @param[in] symstr The string table
- *
- * @return The symbol name
- */
-const char * Elf64_info::get_symbol_name(const void * symbols, int idx, const char * symstr) const
-{
-    const Elf64_Sym * pSym = &((const Elf64_Sym *)symbols)[idx];
-    const int name_idx = pSym->st_name;
-    return &(symstr[name_idx]);
-}
-
-/**
- * Get the section name value for the section specified by the
- * index
- *
- * @param[in] shndx The index in section header of the section to get
- *
- * @return the section name
- */
-char * Elf32_info::get_section_name(int shndx) const
-{
-    const Elf32_Shdr * shdr = &(reinterpret_cast<const Elf32_Shdr *>(m_shdr))[shndx];
-    const int name_idx = shdr->sh_name;
-    return &m_shstrtab[name_idx];
-}
-
-/**
- * Get the section name value for the section specified by the
- * index
- *
- * @param[in] shndx The index in section header of the section to get
- *
- * @return the section name
- */
-char * Elf64_info::get_section_name(int shndx) const
-{
-    const Elf64_Shdr * shdr = &(reinterpret_cast<const Elf64_Shdr *>(m_shdr))[shndx];
-    const int name_idx = shdr->sh_name;
-    return &m_shstrtab[name_idx];
-}
-
-/**
- * Get the section type value for the section specified by the
- * index
- *
- * @param[in] shndx The index in section header of the section to get
- *
- * @return the section name
- */
-unsigned Elf32_info::get_section_type(int shndx) const
-{
-    const Elf32_Shdr * shdr = &(reinterpret_cast<const Elf32_Shdr *>(m_shdr))[shndx];
-    return shdr->sh_type;
-}
-
-/**
- * Get the section type value for the section specified by the
- * index
- *
- * @param[in] shndx The index in section header of the section to get
- *
- * @return the section name
- */
-unsigned Elf64_info::get_section_type(int shndx) const
-{
-    const Elf64_Shdr * shdr = &(reinterpret_cast<const Elf64_Shdr *>(m_shdr))[shndx];
-    return shdr->sh_type;
+        if(print_shdr_tab)
+        {
+            LOG_DEBUG("ELF Shdr[%02u] %19s %11s ", idx, section_name, shtype2str(_typ));
+//            LOG_DEBUG_APPEND("%08lx %08lx-%08lx", (unsigned long) pShdr->sh_addr,
+//                                             (unsigned long) pShdr->sh_offset,
+//                                      (unsigned long) pShdr->sh_offset+pShdr->sh_size);
+        }
+        if(_typ == typ_to_find)
+        {
+            retVal = idx;
+        }
+    }
+    return retVal;
 }
 
 
