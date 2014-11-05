@@ -4,7 +4,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <sys/mman.h>
-
+#include <assert.h>
 #include <stdint.h>
 
 #include "logging.h"
@@ -175,6 +175,7 @@ Elf_info * Elf_info::create(Map_entry * map)
         if(elf_info)
         {
             elf_info->m_fd = fd;
+            elf_info->m_mem_map = map;
         }
         else
         {
@@ -195,47 +196,62 @@ void Elf_info::switch_map(Map_entry * map)
  */
 Elf_info::~Elf_info()
 {
+    LOG_DEBUG("~Elf_info");
+
     if(m_fd >= 0)
     {
         close(m_fd);
         m_fd = -1;
     }
 
-    free(m_shdr);
+    delete [] m_shdr;
     m_shdr = NULL;
 
-    free(m_shstrtab);
+    delete [] m_shstrtab;
     m_shstrtab = NULL;
 }
 
 /**
- * Get section header from elf file
+ * Load section header from elf file into memory. Also load the
+ * section header string table.
  *
  * @return True on success
  */
-bool Elf_info::get_elf_section_header_table()
+bool Elf_info::load_elf_section_header_table(bool * just_done)
 {
+    if(m_shdr)
+    {
+        if(just_done)
+        {
+            *just_done = false;
+        }
+        return true;
+    }
+
     const ssize_t size = m_section_entry_size * m_num_of_sections;
     uint8_t * buf = new uint8_t[size];
     if( pread(m_fd, buf, size, m_e_shoff) != size)
     {
         LOG_ERROR("Failed to Read ELF section header table");
         delete [] buf;
-        exit(0);
+        return false;
     }
     m_shdr = static_cast<uint8_t *>(buf);
 
-    char * shstrtab = static_cast<char *>(get_elf_section(m_e_shstrndx));
+    char * shstrtab = static_cast<char *>(load_elf_section(m_e_shstrndx));
     if( shstrtab == NULL)
     {
         LOG_ERROR("Failed to Read ELF section header table section names");
         delete [] buf;
         m_shdr = NULL;
-        exit(0);
+        return false;
     }
 
-    m_shdr = static_cast<uint8_t *>(buf);
     m_shstrtab = shstrtab;
+    if(just_done)
+    {
+        *just_done = true;
+    }
     return true;
 }
 
@@ -272,6 +288,102 @@ int Elf_info::get_section_idx(unsigned typ_to_find, bool print_shdr_tab) const
         }
     }
     return retVal;
+}
+
+/**
+ * Get the number of symbols in symbol table
+ *
+ * @param[in] symtab_idx The index in the Section header table of symbol table in question
+ *
+ * @return The number of symbols
+ */
+int Elf_info::get_number_of_symbols(int symtab_idx) const
+{
+    const unsigned size = get_section_size(symtab_idx);
+    const unsigned ele_size = get_section_element_size(symtab_idx);
+
+    const int num_of_symbols = size / ele_size;
+    LOG_DEBUG("Number of symbols is %i", num_of_symbols);
+    return num_of_symbols;
+}
+
+/**
+ * Get the Value of the symbol
+ *
+ * @param[in] symbol Pointer to symbol element
+ * @param[out] pValue Place to put the value
+ *
+ * @return true if value has been found
+ */
+bool Elf_info::get_symbol_value(const void * symbol, MemPtr_t * pValue) const
+{
+    /* Not interested in symbol that are not data or code */
+    switch(get_symbol_type(symbol))
+    {
+        case STT_FUNC:
+            assert(m_mem_map);
+            if(!m_mem_map->is_executable())
+            {
+                return false;
+            }
+            break;
+
+        case STT_OBJECT:
+            assert(m_mem_map);
+            if(!m_mem_map->is_accessable())
+            {
+                return false;
+            }
+            break;
+
+        default:
+            return false;
+    }
+
+    unsigned st_shndx = get_symbol_section(symbol);
+    /* Not interested in symbol that are undefined */
+    if(st_shndx == 0)
+    {
+        return false;
+    }
+
+    MemPtr_t value;
+    if(st_shndx == SHN_ABS)
+    {
+        value = get_raw_symbol_value(symbol);
+        /* Is this is not mapped into the memory map entry we are searching */
+        if(!m_mem_map->contains(value))
+        {
+            return false;
+        }
+    }
+    else if(st_shndx >= m_num_of_sections)
+    {
+//        char  * symstr = (char *) elf_info->load_elf_section(strtab_idx);
+//        WARN_MSG("CHECK %s %u", &symstr[pSym->st_name], pSym->st_shndx);
+//        free(symstr);
+        return false;
+    }
+    else /* Get the section that this symbol can be found in */
+    {
+        unsigned sh_offset = get_section_offset(st_shndx);
+
+        MemPtr_t temp = m_mem_map->foffset2addr(sh_offset);
+
+        /* Is this section mapped into the memory map entry we are searching */
+        if(!m_mem_map->contains(temp))
+        {
+            return false;
+        }
+        unsigned sh_addr = get_section_address(st_shndx);
+
+        value = temp + (unsigned) get_raw_symbol_value(symbol) - sh_addr;
+//        LOG_DEBUG("ELF Shdr, %08lx %08lx-%08lx", (unsigned long) sh_addr,
+//                                                 (unsigned long) sh_offset,
+//                                                 (unsigned long) sh_offset+shdr->sh_size);
+    }
+    *pValue = value;
+    return true;
 }
 
 

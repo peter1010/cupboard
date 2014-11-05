@@ -1,6 +1,8 @@
 #ifndef _MMAP_ENTRY_H_
 #define _MMAP_ENTRY_H_
 
+#include <sys/mman.h>
+
 /**
  * Structure containing a parsed text line from the memory map proc file
  */

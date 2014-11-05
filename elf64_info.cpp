@@ -26,7 +26,7 @@ Elf64_info::~Elf64_info()
  *
  * @return Section contents in a malloced memory block
  */
-void * Elf64_info::get_elf_section(int shndx) const
+void * Elf64_info::load_elf_section(int shndx) const
 {
     const Elf64_Shdr * shdr = reinterpret_cast<const Elf64_Shdr *>(get_shdr(shndx));
     const size_t size = shdr->sh_size;
@@ -46,14 +46,13 @@ void * Elf64_info::get_elf_section(int shndx) const
  * Get the symbol type value for the symbol specified by the
  * index
  *
- * @param[in] symbols Pointer to section containing the symbols
- * @param[in] idx The index in section header of the section to get
+ * @param[in] symbol Pointer to symbol element
  *
  * @return the type
  */
-unsigned Elf64_info::get_symbol_type(const void * symbols, int idx) const
+unsigned Elf64_info::get_symbol_type(const void * symbol) const
 {
-    const Elf64_Sym * pSym = &((const Elf64_Sym *)symbols)[idx];
+    const Elf64_Sym * pSym = ((const Elf64_Sym *)symbol);
     return ELF64_ST_TYPE(pSym->st_info);
 }
 
@@ -72,21 +71,60 @@ unsigned Elf64_info::get_section_address(int shndx) const
 }
 
 /**
- * Get the number of symbols in symbol table
+ * Get the symbol section value for the symbol specified by the
+ * index
  *
- * @param[in] symtab_idx The index in the Section header table of symbol table in question
+ * @param[in] symbol Pointer symbol element
  *
- * @return The number of symbols
+ * @return the section index
  */
-int Elf64_info::get_number_of_symbols(int symtab_idx) const
+unsigned Elf64_info::get_symbol_section(const void * symbol) const
 {
-    const Elf64_Shdr * symtab = reinterpret_cast<const Elf64_Shdr *>(get_shdr(symtab_idx));
-    const unsigned size = symtab->sh_size;
-    const unsigned ele_size = symtab->sh_entsize;
-    assert(sizeof(Elf64_Sym) <= ele_size);
-    const int num_of_symbols = size / ele_size;
-    LOG_DEBUG("Number of symbols is %i", num_of_symbols);
-    return num_of_symbols;
+    const Elf64_Sym * pSym = ((const Elf64_Sym *)symbol);
+    return pSym->st_shndx;
+}
+
+/**
+ * Get the symbol value for the symbol specified by the
+ * index
+ *
+ * @param[in] symbol Pointer to symbol element
+ *
+ * @return the section index
+ */
+MemPtr_t Elf64_info::get_raw_symbol_value(const void * symbol) const
+{
+    const Elf64_Sym * pSym = ((const Elf64_Sym *)symbol);
+    return (MemPtr_t) (pSym->st_value);
+}
+
+/**
+ * Get the name of the symbol
+ *
+ * @param[in] symbol Pointer to symbol element
+ * @param[in] symstr The string table
+ *
+ * @return The symbol name
+ */
+const char * Elf64_info::get_symbol_name(const void * symbol, const char * symstr) const
+{
+    const Elf64_Sym * pSym = ((const Elf64_Sym *)symbol);
+    const int name_idx = pSym->st_name;
+    const char * symbol_name = &symstr[name_idx];
+    LOG_DEBUG("%08lx => %s (%llu) {%i}", (unsigned long) pSym->st_value, symbol_name, pSym->st_size, pSym->st_shndx);
+    return symbol_name;
+}
+
+unsigned Elf64_info::get_section_element_size(int idx) const
+{
+    const Elf64_Shdr * shdr = reinterpret_cast<const Elf64_Shdr *>(get_shdr(idx));
+    return shdr->sh_entsize;
+}
+
+unsigned Elf64_info::get_section_size(int idx) const
+{
+    const Elf64_Shdr * shdr = reinterpret_cast<const Elf64_Shdr *>(get_shdr(idx));
+    return shdr->sh_size;
 }
 
 /**
@@ -97,56 +135,10 @@ int Elf64_info::get_number_of_symbols(int symtab_idx) const
  *
  * @return the offset
  */
-unsigned Elf64_info::get_section_offset(int shndx) const
+unsigned Elf64_info::get_section_offset(int idx) const
 {
-    const Elf64_Shdr * shdr = reinterpret_cast<const Elf64_Shdr *>(get_shdr(shndx));
+    const Elf64_Shdr * shdr = reinterpret_cast<const Elf64_Shdr *>(get_shdr(idx));
     return shdr->sh_offset;
-}
-
-/**
- * Get the symbol section value for the symbol specified by the
- * index
- *
- * @param[in] symbols Pointer to section containing the symbols
- * @param[in] idx The index in section header of the section to get
- *
- * @return the section index
- */
-unsigned Elf64_info::get_symbol_section(const void * symbols, int idx) const
-{
-    const Elf64_Sym * pSym = &((const Elf64_Sym *)symbols)[idx];
-    return pSym->st_shndx;
-}
-
-/**
- * Get the symbol value for the symbol specified by the
- * index
- *
- * @param[in] symbols Pointer to section containing the symbols
- * @param[in] idx The index in section header of the section to get
- *
- * @return the section index
- */
-MemPtr_t Elf64_info::get_raw_symbol_value(const void * symbols, int idx) const
-{
-    const Elf64_Sym * pSym = &((const Elf64_Sym *)symbols)[idx];
-    return (MemPtr_t) (pSym->st_value);
-}
-
-/**
- * Get the name of the symbol
- *
- * @param[in] symbols Pointer to section containing the symbols
- * @param[in] idx The index in section header of the section to get
- * @param[in] symstr The string table
- *
- * @return The symbol name
- */
-const char * Elf64_info::get_symbol_name(const void * symbols, int idx, const char * symstr) const
-{
-    const Elf64_Sym * pSym = &((const Elf64_Sym *)symbols)[idx];
-    const int name_idx = pSym->st_name;
-    return &(symstr[name_idx]);
 }
 
 /**
@@ -170,11 +162,11 @@ char * Elf64_info::get_section_name(int shndx) const
  *
  * @param[in] shndx The index in section header of the section to get
  *
- * @return the section name
+ * @return the section type
  */
-unsigned Elf64_info::get_section_type(int shndx) const
+unsigned Elf64_info::get_section_type(int idx) const
 {
-    const Elf64_Shdr * shdr = reinterpret_cast<const Elf64_Shdr *>(get_shdr(shndx));
+    const Elf64_Shdr * shdr = reinterpret_cast<const Elf64_Shdr *>(get_shdr(idx));
     return shdr->sh_type;
 }
 
@@ -182,13 +174,13 @@ unsigned Elf64_info::get_section_type(int shndx) const
  * Get the section link value for the section specified by the
  * index
  *
- * @param[in] shndx The index in section header of the section to get
+ * @param[in] idx The index in section header of the section to get
  *
- * @return the section name
+ * @return the value of section link field
  */
-unsigned Elf64_info::get_section_link(int shndx) const
+unsigned Elf64_info::get_section_link(int idx) const
 {
-    const Elf64_Shdr * shdr = reinterpret_cast<const Elf64_Shdr *>(get_shdr(shndx));
+    const Elf64_Shdr * shdr = reinterpret_cast<const Elf64_Shdr *>(get_shdr(idx));
     return shdr->sh_link;
 }
 

@@ -9,7 +9,6 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <string.h>
-#include <sys/mman.h>
 
 #include "symbols.h"
 #include "logging.h"
@@ -178,6 +177,10 @@ int Map_entry::open_elf() const
     if(m_pathname)
     {
         fd = open(m_pathname, O_RDONLY);
+        if(fd <= 0)
+        {
+            LOG_ERROR("Failed to open '%s'", m_pathname);
+        }
     }
     return fd;
 }
