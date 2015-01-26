@@ -1,6 +1,14 @@
 symbols
 ========
 
+A set of useful(?) tools for low-level debug of applications running under
+Linux. Most have been developed by me as a learning excercise to
+understand deeper how it all works.
+
+
+lookup
+======
+
 Two binaries to get Symbol name or Symbal address from a running processes
 
 Run 'make' to build the code, the build has only been tested on
