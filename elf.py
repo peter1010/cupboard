@@ -24,17 +24,48 @@ def elf_header_fmt(arch_size, endianess):
 
 def prog_header_fmt(arch_size, endianess):
     if arch_size == 32:
-        fmt = "{}LLLLLLLL".format(endianess)
+        fmt = "{}LLLLLLLL"
     else:
-        fmt = "{}LLQQQQQQ".format(endianess)
+        fmt = "{}LLQQQQQQ"
+    fmt = fmt.format(endianess)
     return fmt, struct.calcsize(fmt)
+
+
+def section_header_fmt(arch_size, endianess):
+    if arch_size == 32:
+        fmt = "{}LLLLLLLLLL"
+    else:
+        fmt = "{}LLQQQQLLQQ"
+    fmt = fmt.format(endianess)
+    return fmt, struct.calcsize(fmt)
+
+
+def symtab_entry_fmt(arch_size, endianess):
+    if arch_size == 32:
+        fmt = "{}LLLBBW"
+    else:
+        fmt = "{}LBBWQQ"
+    fmt = fmt.format(endianess)
+    return fmt, struct.calcsize(fmt)
+
 
 def read_data(in_fp, foffset, size):
     in_fp.seek(foffset)
     data = in_fp.read(size)
     assert len(data) >= size
     return data
- 
+
+
+def p_flags2str(flags):
+    tokens = []
+    if flags & 0x04:
+        tokens.append("R")
+    if flags & 0x02:
+        tokens.append("W")
+    if flags & 0x01:
+        tokens.append("X")
+    return "".join(tokens)
+
 
 class ElfProgramHeaderTable:
     def __init__(self, elf_container, foffset, num_entries, entry_size):
@@ -44,29 +75,28 @@ class ElfProgramHeaderTable:
         self.entry_size = entry_size
 
     def load_from_fp(self, in_fp):
-        data = read_data(in_fp, self.foffset, self.num_entries * self.entry_size)
-        logger.debug("Number of program header entries is %i %i", self.num_entries, self.entry_size)
-        fmt, min_len = prog_header_fmt(self.elf_container.arch_size, self.elf_container.endianess)
-        for i in range(self.num_entries):
-            pos = i * self.entry_size
-            if self.elf_container.arch_size == 32:
+        num_entries, entry_size = self.num_entries, self.entry_size
+        arch_size = self.elf_container.arch_size
+        data = read_data(in_fp, self.foffset, num_entries * entry_size)
+        logger.debug("Number of program header entries is %i", num_entries)
+        fmt, min_len = prog_header_fmt(arch_size,
+            self.elf_container.endianess
+        )
+        for i in range(num_entries):
+            pos = i * entry_size
+            buf = data[pos:pos+min_len]
+            if arch_size == 32:
                 (
                     p_type,   p_offset, p_vaddr, p_paddr,
                     p_filesz, p_memsz,  p_flags, p_align
-                ) = struct.unpack(fmt, data[pos:pos+min_len])
+                ) = struct.unpack(fmt, buf)
             else:
                 (
                     p_type,  p_flags,  p_offset, p_vaddr,
                     p_paddr, p_filesz, p_memsz, p_align
-                ) = struct.unpack(fmt, data[pos:pos+min_len])
-            flags = ""
-            if p_flags & 0x01:
-                flags += "X"
-            elif p_flags & 0x02:
-                flags += "W"
-            elif p_flags & 0x04:
-                flags += "R"
-            p_flags = flags
+                ) = struct.unpack(fmt, buf)
+            dbg_padding(data[pos+min_len:pos+entry_size])
+            p_flags = p_flags2str(p_flags)
 #define PT_NULL         0               /* Program header table entry unused */
 #define PT_LOAD         1               /* Loadable program segment */
 #define PT_DYNAMIC      2               /* Dynamic linking information */
@@ -84,7 +114,7 @@ class ElfProgramHeaderTable:
 #define PT_SUNWBSS      0x6ffffffa      /* Sun Specific segment */
 #define PT_SUNWSTACK    0x6ffffffb      /* Stack segment */
 #define PT_HISUNW       0x6fffffff
-                                                                                                                   
+
             if p_type == 0: # Null entry
                 continue
             if p_type == 1: # PT_LOAD
@@ -111,7 +141,71 @@ class ElfProgramHeaderTable:
 #define PT_SUNWBSS      0x6ffffffa      /* Sun Specific segment */
 #define PT_SUNWSTACK    0x6ffffffb      /* Stack segment */
 #define PT_HISUNW       0x6fffffff
-            print(p_type, p_flags, p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align)
+            if p_filesz > 0:
+                print(p_type, p_flags, p_offset, p_filesz)
+#            print(p_type, p_flags, p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align)
+
+class ElfSection:
+    def __init__(self, hdr_table, foffset, size):
+        self.hdr_table = hdr_table
+        self.foffset = foffset
+        self.size = size
+
+    def load_from_fp(self, in_fp):
+        self.data = read_data(in_fp, self.foffset, self.size)
+
+
+class ElfStrtabSection(ElfSection):
+    def get_string(self, offset):
+        return self.data[offset:self.data.find(b'\0', offset)]
+
+
+class ElfSymtabSection:
+    def temp(self):
+        if archsize == 32:
+            (
+                st_name, st_value, st_size,
+                st_info, st_other, st_shndx
+            ) = struct.unpack(fmt, data[pos:pos+min_len])
+        else:
+            (
+                st_name,  st_info, st_other,
+                st_shndx, st_value, st_size
+            ) = struct.unpack(fmt, data[pos:pos+min_len])
+
+
+def sh_type2class(_typ):
+    # Elf Section types
+    return {
+        0: ('SHT_NULL', None),
+        1: ('SHT_PROGBITS', ElfSection),
+        2: ('SHT_SYMTAB', ElfSymtabSection),
+        3: ('SHT_STRTAB', ElfStrtabSection),
+        4: ('SHT_RELA', ElfSection), 
+        5: ('SHT_HASH', ElfSection), 
+        6: ('SHT_DYNAMIC', ElfSection),
+        7: ('SHT_NOTE', ElfSection),
+        8: ('SHT_NOBITS', ElfSection),
+        9: ('SHT_REL', ElfSection),
+        10: ('SHT_SHLIB', ElfSection),
+        11: ('SHT_DYNSYM', ElfSection),
+        14: ('SHT_INIT_ARRAY', ElfSection),
+        15: ('SHT_FINI_ARRAY', ElfSection),
+        16: ('SHT_PREINIT_ARRAY', ElfSection),
+        17: ('SHT_GROUP', ElfSection),
+        18: ('SHT_SYMTAB_SHNDX', ElfSection),
+        0x6ffffff5: ('SHT_GNU_ATTRIBUTES', ElfSection),
+        0x6ffffff6: ('SHT_GNU_HASH', ElfSection),
+        0x6ffffff7: ('SHT_GNU_LIBLIST', ElfSection),
+        0x6ffffff8: ('SHT_CHECKSUM', ElfSection),
+        0x6ffffffa: ('SHT_SUNW_move', ElfSection),
+        0x6ffffffb: ('SHT_SUNW_COMDAT', ElfSection),
+        0x6ffffffc: ('SHT_SUNW_syminfo', ElfSection),
+        0x6ffffffd: ('SHT_GNU_verdef', ElfSection),
+        0x6ffffffe: ('SHT_GNU_verneed', ElfSection),
+        0x6fffffff: ('SHT_GNU_versym', ElfSection),
+    }[_typ]
+
 
 class ElfSectionHeaderTable:
     def __init__(self, elf_container, foffset, num_entries, entry_size, section_str_idx):
@@ -122,10 +216,35 @@ class ElfSectionHeaderTable:
         self.section_str_idx = section_str_idx
 
     def load_from_fp(self, in_fp):
-        data = read_data(in_fp, self.foffset, self.num_entries * self.entry_size)
-        logger.debug("Number of Section header entries is %i %i", self.num_entries, self.entry_size)
-        pass
- 
+        num_entries, entry_size = self.num_entries, self.entry_size
+        data = read_data(in_fp, self.foffset, num_entries * entry_size)
+        logger.debug("Number of Section header entries is %i", num_entries)
+        fmt, min_len = section_header_fmt(self.elf_container.arch_size,
+            self.elf_container.endianess
+        )
+        entries = [self.section_str_idx] \
+                + list(range(self.section_str_idx)) \
+                + list(range(self.section_str_idx+1, num_entries))
+        section_strtab = None
+        for i in entries:
+            pos = i * entry_size
+            (
+                sh_name,   sh_type, sh_flags, sh_addr,
+                sh_offset, sh_size, sh_link, sh_info,
+                sh_addralign, sh_entsize
+            ) = struct.unpack(fmt, data[pos:pos+min_len])
+            dbg_padding(data[pos+min_len:pos+entry_size])
+            sh_type, _class = sh_type2class(sh_type)
+            if _class:
+                obj = _class(self, sh_offset, sh_size)
+                obj.load_from_fp(in_fp)
+                if i == self.section_str_idx:
+                    section_strtab = obj
+                sh_name = section_strtab.get_string(sh_name)
+                obj.name = sh_name
+            if sh_size > 0:
+                print(sh_name, sh_type, sh_offset, sh_size)
+
 
 class Elf:
     def __init__(self, arch_size, endianess):
