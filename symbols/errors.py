@@ -1,0 +1,3 @@
+
+class NotElfFileError(FileNotFoundError):
+    pass

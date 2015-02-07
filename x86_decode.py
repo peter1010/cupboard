@@ -51,20 +51,28 @@ def modrm2reg8(data, idx):
             op1 = "[{}]".format(disp)
         else:
             op1 = to_indirect(op1_code)
-    elif mod == 0x40
+    elif mod == 0x40:
+        # 8 bit displacement
         disp = data[idx+1]
-        op1 = to_indirect(op1_code) + "+{}".format(disp)
+        if disp > 127:   # Byte is signed!
+            disp = disp - 256
+        op1 = to_indirect(op1_code) + "+[{}]".format(disp)
         idx += 1
     elif mod == 0x80:
         # 16 bit displacement
         disp = data[idx+1] + data[idx+2] * 256
+        if disp > 32767: # Word is signed!
+            disp = disp - 65536
         op1 = to_indirect(op1_code) + "+{}".format(disp)
         idx += 2
-    elif mod == 0xc0
+    elif mod == 0xc0:
         op1 = to_r8_reg(op1_code)
     op2 = to_r8_reg((modrm & 0x38) >> 3)
     return idx+1, (op1, op2)
 
+
+def modrm2reg16_32(data, idx):
+    pass
 
 def opcode2reg16_32(data, idx):
     """For Opcodes where last 3 bits encode the register"""
@@ -75,7 +83,7 @@ def opcode2reg16_32(data, idx):
     return to_r16_reg(val), idx
 
 
-one_byte_opcodes = {
+one_byte_opcodes = (
     # 0x00 - 0x0f
     ("ADD", modrm2reg8),
     ("ADD", modrm2reg16_32),
@@ -375,4 +383,6 @@ def decode(data):
 
     if octet == 0x0f:
         # Two byte opcode
+        pass
     else:
+        pass

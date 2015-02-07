@@ -7,6 +7,8 @@ import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
+from . import errors
+
 def dbg_padding(data):
     non_nulls = [b for b in data if b != 0]
     if len(non_nulls) > 0:
@@ -330,17 +332,19 @@ class Elf:
             e_phentsize, e_phnum,   e_shentsize, e_shnum,
             e_shstrndx) = struct.unpack(fmt, data)
         # TODO, type, machine, flags
-        logger.debug("e_type=%i e_machine=%i e_flags=0x%X", e_type, e_machine,
-            e_flags
+        logger.debug("e_type=%i e_machine=%i e_flags=0x%X",
+            e_type, e_machine, e_flags
         )
         if e_version != 1:
             logger.error("Not an valid ELF Header version %i", e_version)
-            return None
+            raise errors.NotElfFileError()
         # TODO, e_entry
         logger.debug("e_entry=0x%X", e_entry)
         if e_ehsize < len(data):
-            logger.error("Invalid header length %i !< %i", e_ehsize, len(data))
-            return None
+            logger.error("Invalid header length %i !< %i",
+                e_ehsize, len(data)
+            )
+            raise errors.NotElfFileError()
         dbg_padding(in_fp.read(e_ehsize-len(data)))
         obj = ElfProgramHeaderTable(self, e_phoff, e_phnum, e_phentsize)
         obj.load_from_fp(in_fp)
@@ -361,7 +365,7 @@ def load_elf(in_fp):
     magic = e_ident[:4]
     if magic != b'\x7fELF':
         logger.error("Not an ELF file")
-        return None
+        raise errors.NotElfFileError()
     _class = e_ident[4]
     if _class == 1:
         arch_size = 32
@@ -369,7 +373,7 @@ def load_elf(in_fp):
         arch_size = 64
     else:
         logger.error("Invalid ELF class %i", _class)
-        return None
+        raise errors.NotElfFileError()
     endianess = e_ident[5]
     if endianess == 1:
         endianess = '<'     # little-endian
@@ -377,11 +381,11 @@ def load_elf(in_fp):
         endianess = '>'     # Big-endian
     else:
         logger.error("Invalid ELF Endianess %i", endianess)
-        return None
+        raise errors.NotElfFileError()
     version = e_ident[6]
     if version != 1:
         logger.error("Not an valid ELF version %i", version)
-        return None
+        raise errors.NotElfFileError()
     logger.info("ELF Class is %i, %s", arch_size, endianess)
     logger.debug("EI_OSABI=%i, EI_ABIVERSION=%i", e_ident[7], e_ident[8])
     dbg_padding(e_ident[9:])
