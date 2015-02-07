@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 
+"""Code for parsing ELF files.
+
+As parts of the elf file are parsed the
+data discovered is passed to the data model database using the consumer proxy
+"""
+
 import sys
 import struct
 import logging
@@ -44,9 +50,9 @@ def section_header_fmt(arch_size, endianess):
 
 def symtab_entry_fmt(arch_size, endianess):
     if arch_size == 32:
-        fmt = "{}LLLBBW"
+        fmt = "{}LLLBBH"
     else:
-        fmt = "{}LBBWQQ"
+        fmt = "{}LBBHQQ"
     fmt = fmt.format(endianess)
     return fmt, struct.calcsize(fmt)
 
@@ -70,19 +76,19 @@ def p_flags2str(flags):
 
 
 class ElfProgramHeaderTable:
-    def __init__(self, elf_container, foffset, num_entries, entry_size):
-        self.elf_container = elf_container
+    def __init__(self, parent, foffset, num_entries, entry_size):
+        self.parent = parent
         self.foffset = foffset
         self.num_entries = num_entries
         self.entry_size = entry_size
 
     def load_from_fp(self, in_fp):
         num_entries, entry_size = self.num_entries, self.entry_size
-        arch_size = self.elf_container.arch_size
+        arch_size = self.parent.arch_size
         data = read_data(in_fp, self.foffset, num_entries * entry_size)
         logger.debug("Number of program header entries is %i", num_entries)
         fmt, min_len = prog_header_fmt(arch_size,
-            self.elf_container.endianess
+            self.parent.endianess
         )
         for i in range(num_entries):
             pos = i * entry_size
@@ -149,29 +155,68 @@ class ElfProgramHeaderTable:
 
 
 class ElfSection:
-    def __init__(self, hdr_table, foffset, size):
-        self.hdr_table = hdr_table
+    def __init__(self, fp, parent, i_name, foffset, size, entry_size, link):
+        self.parent = parent
+        self.i_name = i_name
         self.foffset = foffset
         self.size = size
+        self.entry_size = entry_size
+        self.link = link
+        self.in_fp = fp
+        self.data = None
 
-    def load_from_fp(self, in_fp):
-        self.data = read_data(in_fp, self.foffset, self.size)
+    @property
+    def name(self):
+        self.parent.get_section_strtab().get_string(self.i_name)
+
+    def load_data(self):
+        if not self.data:
+            self.data = read_data(self.in_fp, self.foffset, self.size)
+        
+    def consume_symbols(self):
+        pass
 
     @property
     def arch_size(self):
-        return self.hdr_table.arch_size
+        return self.parent.arch_size
 
     @property
     def endianess(self):
-        return self.hdr_table.endianess
+        return self.parent.endianess
 
     def dbg_print(self):
         pass
 
 
+class ElfNullSection(ElfSection):
+    TYPE_NAME = "SHT_NULL"
+
+
+class ElfProgSection(ElfSection):
+    TYPE_NAME = "SHT_PROGBITS"
+
+
 class ElfStrtabSection(ElfSection):
+    TYPE_NAME = "SHT_STRTAB"
     def get_string(self, offset):
+        self.load_data()
         return self.data[offset:self.data.find(b'\0', offset)]
+
+
+class ElfNoteSection(ElfSection):
+    TYPE_NAME = "SHT_NOTE"
+
+
+class ElfHashSection(ElfSection):
+    TYPE_NAME = "SHT_GNU_HASH"
+
+
+class ElfVersymSection(ElfSection):
+    TYPE_NAME = "SHT_GNU_versym"
+
+
+class ElfVerneedSection(ElfSection):
+    TYPE_NAME = "SHT_GNU_verneed"
 
 
 class Symbol:
@@ -184,89 +229,76 @@ class Symbol:
     def __str__(self):
         return "{}:{}".format(self.name, self.value)
 
-    @staticmethod
-    def parse_elf_symbol(self, container, data):
-        arch_size, endianess = container.arch_size, container.endianess
-        fmt, min_len = symtab_entry_fmt(arch_size, endianess)
-        if archsize == 32:
-            (
-                st_name, st_value, st_size,
-                st_info, st_other, st_shndx
-            ) = struct.unpack(fmt, data)
-        else:
-            (
-                st_name,  st_info, st_other,
-                st_shndx, st_value, st_size
-            ) = struct.unpack(fmt, data)
-        dbg_padding(data[min_len:])
-        name = self.parent.link.get_string(st_name)
-        return Symbol(parent)
-
 
 
 class ElfSymtabSection(ElfSection):
-    def __init__(self, hdr_table, foffset, size, entry_size, link):
-        super(ElfSymtabSection, self).__init__(hdr_table, foffset, size)
-        self.entry_size = entry_size
-        self.link = link
-
+    TYPE_NAME = "SHT_SYMTAB"
     def num_of(self):
         return self.size // self.entry_size
 
-    def get_symbol(self, i):
+    def consume_symbol(self, i):
+        strtab = self.parent.get_section(self.link)
         pos = i * self.entry_size
-        fmt, min_len = section_header_fmt(self.arch_size, self.endianess)
-        if archsize == 32:
+        fmt, min_len = symtab_entry_fmt(self.arch_size, self.endianess)
+        if self.arch_size == 32:
             (
                 st_name, st_value, st_size,
                 st_info, st_other, st_shndx
-            ) = struct.unpack(fmt, data[pos:pos+min_len])
+            ) = struct.unpack(fmt, self.data[pos:pos+min_len])
         else:
             (
                 st_name,  st_info, st_other,
                 st_shndx, st_value, st_size
-            ) = struct.unpack(fmt, data[pos:pos+min_len])
-        dbg_padding(data[pos+min_len:pos+entry_size])
-        st_name = self.link.get_string(st_name)
+            ) = struct.unpack(fmt, self.data[pos:pos+min_len])
+        dbg_padding(self.data[pos+min_len:pos+self.entry_size])
+        name = strtab.get_string(st_name)
+        print(name)
         return Symbol(st_name, st_value)
 
+    def consume_symbols(self):
+        self.load_data()
+        for i in range(self.num_of()):
+            self.consume_symbol(i)
+
+class ElfDynSymtabSection(ElfSymtabSection):
+    TYPE_NAME = "SHT_DYNSYM"
 
 def sh_type2class(_typ):
     # Elf Section types
     return {
-        0: ('SHT_NULL', ElfSection),
-        1: ('SHT_PROGBITS', ElfSection),
-        2: ('SHT_SYMTAB', ElfSymtabSection),
-        3: ('SHT_STRTAB', ElfStrtabSection),
+        0: (None, ElfNullSection),
+        1: (None, ElfProgSection),
+        2: (None, ElfSymtabSection),
+        3: (None, ElfStrtabSection),
         4: ('SHT_RELA', ElfSection), 
         5: ('SHT_HASH', ElfSection), 
         6: ('SHT_DYNAMIC', ElfSection),
-        7: ('SHT_NOTE', ElfSection),
+        7: ('SHT_NOTE', ElfNoteSection),
         8: ('SHT_NOBITS', ElfSection),
         9: ('SHT_REL', ElfSection),
         10: ('SHT_SHLIB', ElfSection),
-        11: ('SHT_DYNSYM', ElfSection),
+        11: (None, ElfDynSymtabSection),
         14: ('SHT_INIT_ARRAY', ElfSection),
         15: ('SHT_FINI_ARRAY', ElfSection),
         16: ('SHT_PREINIT_ARRAY', ElfSection),
         17: ('SHT_GROUP', ElfSection),
         18: ('SHT_SYMTAB_SHNDX', ElfSection),
         0x6ffffff5: ('SHT_GNU_ATTRIBUTES', ElfSection),
-        0x6ffffff6: ('SHT_GNU_HASH', ElfSection),
+        0x6ffffff6: ('SHT_GNU_HASH', ElfHashSection),
         0x6ffffff7: ('SHT_GNU_LIBLIST', ElfSection),
         0x6ffffff8: ('SHT_CHECKSUM', ElfSection),
         0x6ffffffa: ('SHT_SUNW_move', ElfSection),
         0x6ffffffb: ('SHT_SUNW_COMDAT', ElfSection),
         0x6ffffffc: ('SHT_SUNW_syminfo', ElfSection),
         0x6ffffffd: ('SHT_GNU_verdef', ElfSection),
-        0x6ffffffe: ('SHT_GNU_verneed', ElfSection),
-        0x6fffffff: ('SHT_GNU_versym', ElfSection),
+        0x6ffffffe: (None, ElfVerneedSection),
+        0x6fffffff: (None, ElfVersymSection),
     }[_typ]
 
 
 class ElfSectionHeaderTable:
-    def __init__(self, elf_container, foffset, num_entries, entry_size, section_str_idx):
-        self.elf_container = elf_container
+    def __init__(self, parent, foffset, num_entries, entry_size, section_str_idx):
+        self.parent = parent
         self.foffset = foffset
         self.num_entries = num_entries
         self.entry_size = entry_size
@@ -274,12 +306,19 @@ class ElfSectionHeaderTable:
 
     @property
     def arch_size(self):
-        return self.elf_container.arch_size
+        return self.parent.arch_size
 
     @property
     def endianess(self):
-        return self.elf_container.endianess
+        return self.parent.endianess
 
+    def get_section_strtab(self):
+        return self.sections[self.section_str_idx]
+    
+    def get_section(self, idx):
+        return self.sections[idx]
+
+#    .get_string(sh_name)
     def load_from_fp(self, in_fp):
         num_entries, entry_size = self.num_entries, self.entry_size
         data = read_data(in_fp, self.foffset, num_entries * entry_size)
@@ -287,11 +326,8 @@ class ElfSectionHeaderTable:
         fmt, min_len = section_header_fmt(self.arch_size,
             self.endianess
         )
-        idx = self.section_str_idx
-        entries = [idx] + list(range(idx)) + list(range(idx+1, num_entries))
-        section_strtab = None
         sections = []
-        for i in entries:
+        for i in range(num_entries):
             pos = i * entry_size
             (
                 sh_name,   sh_type, sh_flags, sh_addr,
@@ -300,25 +336,29 @@ class ElfSectionHeaderTable:
             ) = struct.unpack(fmt, data[pos:pos+min_len])
             dbg_padding(data[pos+min_len:pos+entry_size])
             sh_type, _class = sh_type2class(sh_type)
-            obj = _class(self, sh_offset, sh_size)
-            obj.load_from_fp(in_fp)
-            if i == self.section_str_idx:
-                section_strtab = obj
-            sh_name = section_strtab.get_string(sh_name)
-            obj.name = sh_name
-            print(i, sh_name, sh_type, sh_offset, sh_size)
+            obj = _class(in_fp, self, sh_name, sh_offset, sh_size, sh_entsize,
+                sh_link
+            )
+            if not hasattr(obj, "TYPE_NAME"):
+                print(sh_type)
+                obj.TYPE_NAME = sh_type
             sections.append(obj)
-        sections = sections[1:idx] + sections[idx:idx+1] + sections[idx+1:]
-        for section in sections:
-            if hasattr(section, "link"):
-                section.link = sections[section.link]
-            section.dbg_print()
+        self.sections = sections
+
+        for i, section in enumerate(sections):
+            section.consume_symbols()
+            print(i, section.name, section.TYPE_NAME, section.foffset, section.size)
+#        for section in sections:
+#            if hasattr(section, "link"):
+#                section.link = sections[section.link]
+#            section.dbg_print()
 
 
 class Elf:
-    def __init__(self, arch_size, endianess):
+    def __init__(self, arch_size, endianess, consumer):
         self.arch_size = arch_size
         self.endianess = endianess
+        self.consumer = consumer
         self.program_header_table = None
         self.section_header_table = None
 
@@ -346,18 +386,19 @@ class Elf:
             )
             raise errors.NotElfFileError()
         dbg_padding(in_fp.read(e_ehsize-len(data)))
-        obj = ElfProgramHeaderTable(self, e_phoff, e_phnum, e_phentsize)
-        obj.load_from_fp(in_fp)
-        self.program_header_table = obj
-        print(e_shentsize, e_shnum, e_shstrndx)
+        # Load the Sections (we are interested in the Symbol table)
         obj = ElfSectionHeaderTable(self, e_shoff, e_shnum, e_shentsize,
             e_shstrndx
         )
         obj.load_from_fp(in_fp)
         self.section_header_table = obj
+        # Load the Program Header
+        obj = ElfProgramHeaderTable(self, e_phoff, e_phnum, e_phentsize)
+        obj.load_from_fp(in_fp)
+        self.program_header_table = obj
 
 
-def load_elf(in_fp):
+def load_elf(in_fp, consumer):
     """Start by reading the ELD header
 
     See /us/include/elf.h for meaning of fields"""
@@ -389,14 +430,22 @@ def load_elf(in_fp):
     logger.info("ELF Class is %i, %s", arch_size, endianess)
     logger.debug("EI_OSABI=%i, EI_ABIVERSION=%i", e_ident[7], e_ident[8])
     dbg_padding(e_ident[9:])
-    obj = Elf(arch_size, endianess)
+    obj = Elf(arch_size, endianess, consumer)
     obj.load_from_fp(in_fp)
 
 
-def read_elffile(filename):
+def read_elffile(filename, consumer):
+    """Read A elf file, calling methods on the consumer object
+    
+    The consumer is a proxy object that stores away information
+    discovered whilst reading the Elf file"""
     with open(filename, "rb") as in_fp:
-        load_elf(in_fp)
+        consumer.set_data_source(filename)
+        load_elf(in_fp, consumer)
+
 
 if __name__ == "__main__":
+    from . import consumer
+    
     logging.basicConfig(level=logging.DEBUG)
-    read_elffile(sys.argv[1])
+    read_elffile(sys.argv[1], consumer.DefaultConsumer)
