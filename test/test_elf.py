@@ -15,6 +15,9 @@ class Consumer:
     def set_data_source(self, pathname):
         self.pathname = pathname
 
+    def add_symbol(self, sym):
+        print(sym)
+
 class ElfTest(unittest.TestCase):
     
     def testLoad_badfile(self):

@@ -5,6 +5,7 @@ import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
+from . import parse_elf
 
 class Application:
 
@@ -36,9 +37,11 @@ class Application:
                 ("All files", "*")
             )
         )
+        logger.info("Loading file %s", path)
+        parse_elf.read_elffile(path, None)
 
     def quit(self):
-        pass
+        self.root.quit()
 
 
 

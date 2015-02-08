@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 from . import errors
+from . import symbol
 
 def dbg_padding(data):
     non_nulls = [b for b in data if b != 0]
@@ -21,7 +22,7 @@ def dbg_padding(data):
         logging.debug("PADDING = %s", str(data))
 
 
-def elf_header_fmt(arch_size, endianess):
+def _elf_header_fmt(arch_size, endianess):
     if arch_size == 32:
         ptrs = "LLL"
     else:
@@ -30,7 +31,7 @@ def elf_header_fmt(arch_size, endianess):
     return fmt, struct.calcsize(fmt)
 
 
-def prog_header_fmt(arch_size, endianess):
+def _prog_header_fmt(arch_size, endianess):
     if arch_size == 32:
         fmt = "{}LLLLLLLL"
     else:
@@ -39,7 +40,7 @@ def prog_header_fmt(arch_size, endianess):
     return fmt, struct.calcsize(fmt)
 
 
-def section_header_fmt(arch_size, endianess):
+def _section_header_fmt(arch_size, endianess):
     if arch_size == 32:
         fmt = "{}LLLLLLLLLL"
     else:
@@ -48,7 +49,7 @@ def section_header_fmt(arch_size, endianess):
     return fmt, struct.calcsize(fmt)
 
 
-def symtab_entry_fmt(arch_size, endianess):
+def _symtab_entry_fmt(arch_size, endianess):
     if arch_size == 32:
         fmt = "{}LLLBBH"
     else:
@@ -57,7 +58,16 @@ def symtab_entry_fmt(arch_size, endianess):
     return fmt, struct.calcsize(fmt)
 
 
-def read_data(in_fp, foffset, size):
+def _reloc_entry_fmt(arch_size, endianess):
+    if arch_size == 32:
+        fmt = "{}LL"
+    else:
+        fmt = "{}QQ"
+    fmt = fmt.format(endianess)
+    return fmt, struct.calcsize(fmt)
+
+
+def _read_data(in_fp, foffset, size):
     in_fp.seek(foffset)
     data = in_fp.read(size)
     assert len(data) >= size
@@ -85,9 +95,9 @@ class ElfProgramHeaderTable:
     def load_from_fp(self, in_fp):
         num_entries, entry_size = self.num_entries, self.entry_size
         arch_size = self.parent.arch_size
-        data = read_data(in_fp, self.foffset, num_entries * entry_size)
+        data = _read_data(in_fp, self.foffset, num_entries * entry_size)
         logger.debug("Number of program header entries is %i", num_entries)
-        fmt, min_len = prog_header_fmt(arch_size,
+        fmt, min_len = _prog_header_fmt(arch_size,
             self.parent.endianess
         )
         for i in range(num_entries):
@@ -113,15 +123,11 @@ class ElfProgramHeaderTable:
 #define PT_SHLIB        5               /* Reserved */
 #define PT_PHDR         6               /* Entry for header table itself */
 #define PT_TLS          7               /* Thread-local storage segment */
-#define PT_NUM          8               /* Number of defined types */
-#define PT_LOOS         0x60000000      /* Start of OS-specific */
 #define PT_GNU_EH_FRAME 0x6474e550      /* GCC .eh_frame_hdr segment */
 #define PT_GNU_STACK    0x6474e551      /* Indicates stack executability */
 #define PT_GNU_RELRO    0x6474e552      /* Read-only after relocation */
-#define PT_LOSUNW       0x6ffffffa
 #define PT_SUNWBSS      0x6ffffffa      /* Sun Specific segment */
 #define PT_SUNWSTACK    0x6ffffffb      /* Stack segment */
-#define PT_HISUNW       0x6fffffff
 
             if p_type == 0: # Null entry
                 continue
@@ -145,36 +151,48 @@ class ElfProgramHeaderTable:
                 p_type = "PT_GNU_STACK"
             elif p_type == 0x6474e552:
                 p_type = "PT_GNU_RELRO"
-#define PT_LOSUNW       0x6ffffffa
 #define PT_SUNWBSS      0x6ffffffa      /* Sun Specific segment */
 #define PT_SUNWSTACK    0x6ffffffb      /* Stack segment */
-#define PT_HISUNW       0x6fffffff
             if p_filesz > 0:
                 print(p_type, p_flags, p_offset, p_filesz)
 #            print(p_type, p_flags, p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align)
 
 
 class ElfSection:
+    """Base class for all objects that hold info about ELF Sections"""
+
     def __init__(self, fp, parent, i_name, foffset, size, entry_size, link):
         self.parent = parent
-        self.i_name = i_name
-        self.foffset = foffset
-        self.size = size
+        self.i_name = i_name       # Index into section strtab
+        self.foffset = foffset     # File offset
+        self.size = size            
         self.entry_size = entry_size
-        self.link = link
-        self.in_fp = fp
-        self.data = None
+        self.link = link 
+        self.in_fp = fp             
+        self.data = None           # Initial no data read (only read when required) 
+        self.reset()
+
+    def reset(self):
+        pass
 
     @property
     def name(self):
-        self.parent.get_section_strtab().get_string(self.i_name)
+        """Return section name as a string"""
+        return self.parent.get_section_strtab().get_string(self.i_name)
 
     def load_data(self):
         if not self.data:
-            self.data = read_data(self.in_fp, self.foffset, self.size)
+            self.data = _read_data(self.in_fp, self.foffset, self.size)
         
     def consume_symbols(self):
         pass
+
+    def consume_rels(self):
+        pass
+
+    @property
+    def consumer(self):
+        return self.parent.consumer
 
     @property
     def arch_size(self):
@@ -186,6 +204,9 @@ class ElfSection:
 
     def dbg_print(self):
         pass
+
+    def num_of(self):
+        return self.size // self.entry_size
 
 
 class ElfNullSection(ElfSection):
@@ -200,7 +221,8 @@ class ElfStrtabSection(ElfSection):
     TYPE_NAME = "SHT_STRTAB"
     def get_string(self, offset):
         self.load_data()
-        return self.data[offset:self.data.find(b'\0', offset)]
+        byteStr = self.data[offset:self.data.find(b'\0', offset)]
+        return byteStr.decode("ascii")
 
 
 class ElfNoteSection(ElfSection):
@@ -219,27 +241,17 @@ class ElfVerneedSection(ElfSection):
     TYPE_NAME = "SHT_GNU_verneed"
 
 
-class Symbol:
-    def __init__(self, parent, name, value, size, section):
-        self.name = name
-        self.value = value
-        self.size = size
-        self.section = section
-
-    def __str__(self):
-        return "{}:{}".format(self.name, self.value)
-
-
 
 class ElfSymtabSection(ElfSection):
     TYPE_NAME = "SHT_SYMTAB"
-    def num_of(self):
-        return self.size // self.entry_size
 
-    def consume_symbol(self, i):
+    def reset(self):
+        self.done = set()
+
+    def get_symbol(self, idx):
         strtab = self.parent.get_section(self.link)
-        pos = i * self.entry_size
-        fmt, min_len = symtab_entry_fmt(self.arch_size, self.endianess)
+        fmt, min_len = _symtab_entry_fmt(self.arch_size, self.endianess)
+        pos = idx * self.entry_size
         if self.arch_size == 32:
             (
                 st_name, st_value, st_size,
@@ -252,16 +264,52 @@ class ElfSymtabSection(ElfSection):
             ) = struct.unpack(fmt, self.data[pos:pos+min_len])
         dbg_padding(self.data[pos+min_len:pos+self.entry_size])
         name = strtab.get_string(st_name)
-        print(name)
-        return Symbol(st_name, st_value)
+        bind = st_info >> 4
+        typ = st_info & 0x0f
+        self.done.add(idx)
+        return symbol.Symbol(name, st_value, st_size, (bind, typ))
 
     def consume_symbols(self):
         self.load_data()
-        for i in range(self.num_of()):
-            self.consume_symbol(i)
+        consumer = self.consumer
+        strtab = self.parent.get_section(self.link)
+        fmt, min_len = _symtab_entry_fmt(self.arch_size, self.endianess)
+        for idx in range(self.num_of()):
+            if idx in self.done:
+                continue
+            sym = self.get_symbol(idx)
+            consumer.add_symbol(sym)
+
 
 class ElfDynSymtabSection(ElfSymtabSection):
     TYPE_NAME = "SHT_DYNSYM"
+
+
+class ElfRelSection(ElfSection):
+    TYPE_NAME = "SHT_REL"
+
+    def consume_rels(self):
+        sym_section = self.parent.get_section(self.link)
+        sym_section.load_data()
+        self.load_data()
+        arch_size = self.arch_size
+        fmt, min_len = _reloc_entry_fmt(arch_size, self.endianess)
+        consumer = self.consumer
+        for idx in range(self.num_of()):
+            pos = idx * self.entry_size
+            (r_offset, r_info) = struct.unpack(fmt, self.data[pos:pos+min_len])
+            if arch_size == 32:
+                r_sym = r_info >> 8
+                r_typ = r_info & 0xFF
+            else:
+                r_sym = r_info >> 32
+                r_typ = r_info & 0xFFFFFFFF
+
+            sym = sym_section.get_symbol(r_sym)
+            sym.offset = r_offset
+            sym.rel_typ = r_typ
+            consumer.add_symbol(sym)
+
 
 def sh_type2class(_typ):
     # Elf Section types
@@ -275,7 +323,7 @@ def sh_type2class(_typ):
         6: ('SHT_DYNAMIC', ElfSection),
         7: ('SHT_NOTE', ElfNoteSection),
         8: ('SHT_NOBITS', ElfSection),
-        9: ('SHT_REL', ElfSection),
+        9: (None, ElfRelSection),
         10: ('SHT_SHLIB', ElfSection),
         11: (None, ElfDynSymtabSection),
         14: ('SHT_INIT_ARRAY', ElfSection),
@@ -305,6 +353,10 @@ class ElfSectionHeaderTable:
         self.section_str_idx = section_str_idx
 
     @property
+    def consumer(self):
+        return self.parent.consumer
+
+    @property
     def arch_size(self):
         return self.parent.arch_size
 
@@ -321,9 +373,9 @@ class ElfSectionHeaderTable:
 #    .get_string(sh_name)
     def load_from_fp(self, in_fp):
         num_entries, entry_size = self.num_entries, self.entry_size
-        data = read_data(in_fp, self.foffset, num_entries * entry_size)
+        data = _read_data(in_fp, self.foffset, num_entries * entry_size)
         logger.debug("Number of Section header entries is %i", num_entries)
-        fmt, min_len = section_header_fmt(self.arch_size,
+        fmt, min_len = _section_header_fmt(self.arch_size,
             self.endianess
         )
         sections = []
@@ -346,12 +398,11 @@ class ElfSectionHeaderTable:
         self.sections = sections
 
         for i, section in enumerate(sections):
-            section.consume_symbols()
             print(i, section.name, section.TYPE_NAME, section.foffset, section.size)
-#        for section in sections:
-#            if hasattr(section, "link"):
-#                section.link = sections[section.link]
-#            section.dbg_print()
+        for i, section in enumerate(sections):
+            section.consume_rels()
+        for i, section in enumerate(sections):
+            section.consume_symbols()
 
 
 class Elf:
@@ -364,8 +415,8 @@ class Elf:
 
     def load_from_fp(self, in_fp):
         """First Load the ELF header"""
-        fmt, datasize = elf_header_fmt(self.arch_size, self.endianess)
-        data = read_data(in_fp, 16, datasize)
+        fmt, datasize = _elf_header_fmt(self.arch_size, self.endianess)
+        data = _read_data(in_fp, 16, datasize)
         (
             e_type,      e_machine, e_version,   e_entry,
             e_phoff,     e_shoff,   e_flags,     e_ehsize,
