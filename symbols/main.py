@@ -1,4 +1,5 @@
 import tkinter as tk
+import tkinter.ttk as ttk
 import tkinter.filedialog as tkFileDialog
 import logging
 
@@ -14,9 +15,12 @@ class Application:
         self.create_menu(root)
         self.root = root
         self.main = tk.PanedWindow(root,showhandle=True)
-        self.main.pack()
+        self.main.pack(fill=tk.BOTH, expand=1)
         frame1 = tk.Frame(root)
-        frame2 = tk.Frame(root)
+        title = tk.Label(frame1, text="Browser")
+        title.pack(side=tk.TOP)
+
+        frame2 = ttk.Notebook(root)
         self.main.add(frame1)
         self.main.add(frame2)
 
