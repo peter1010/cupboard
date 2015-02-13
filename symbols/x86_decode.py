@@ -9,27 +9,87 @@ SS_OVERRIDE=3
 DS_OVERRIDE=4
 
 
+REGS_8BIT = (
+    "%al",  # Lower 8 bits of A(r0)
+    "%cl",  # Lower 8 bits of C(r2)
+    "%dl",  # Lower 8 bits of D(r3)
+    "%bl",  # Lower 8 bits of B(r1)
+    "%ah",  # Second 8 bits of A(r0)
+    "%ch",  # Second 8 bits of C(r2)
+    "%dh",  # Second 8 bits of D(r3)
+    "%bh"   # Second 8 bits of B(r1)
+)
+
+REGS_16BIT = (
+    "%ax",  # Lower 16 bits of A
+    "%cx",  # Lower 16 bits of C
+    "%dx",  # Lower 16 bite of D
+    "%bx",  # Lower 16 bits of B
+    "%sp",  # Stack pointer (16 bits)
+    "%bp",  # Base Pointer (16 bits)
+    "%si",  # Address reg (16 bits)
+    "%di"   # Address reg (16 bits)
+)
+
+REGS_32BIT = (
+    "%eax", # Lower 32 bits of A
+    "%ecx", # Lower 32 bits of C
+    "%edx", # Lower 32 bits of D
+    "%ebx",
+    "%esp",
+    "%ebp",
+    "%esi",
+    "%edi"
+)
+
+
 def to_r8_reg(val):
-    return (
-        "AL", "CL", "DL", "BL",
-        "AH", "CH", "DH", "BH")[val]
+    return REGS_8BIT[val]
+
+INDIRECT_16BIT = (
+    "(%bx,%si)",
+    "(%bx,%di)",
+    "(%bp,%si)",
+    "(%bp,%di)",
+    "(%si)",
+    "(%di)",
+    "(%bp)",
+    "(%bx)"
+)
+
+INDIRECT_32BIT = (
+    "(%eax)",
+    "(%ecx)",
+    "(%edx)",
+    "(%ebx)",
+    None, # SIB
+    "(%ebp)",
+    "(%esi)",
+    "(%edi)"
+)
 
 
-def to_indirect(val):
-    return ("[BX+SI]","[BX+DI]","[BP+SI]","[BP+DI]",
-            "[SI]","[DI]","[BP]","[BX]")[val]
+def to_indirect(arch, val, disp):
+    if arch.addr_size == 16:
+        regs = INDIRECT_16BIT[val]
+    elif arch.addr_size == 32:
+        regs = INDIRECT_32BIT[val]
+    else:
+        regs = INDIRECT_64BIT[val]
+    if disp:
+        return "{}{}".format(disp, regs)
+    else:
+        return regs
 
 
-def to_r16_reg(val):
-    return (
-        "AX", "CX", "DX", "BX",
-        "SP", "BP", "SI", "DI")[val]
+def to_r16_32_reg(arch, val):
+    if arch.data_size == 32:
+        return REGS_32BIT[val]
+    return REGS_16BIT[val]
 
 
 def to_r32_reg(val):
-    return (
-        "EAX", "ECX", "EDX", "EBX",
-        "ESP", "EBP", "ESI", "EDI")[val]
+    return REGS_32BIT[val]
 
 
 def to_mm_reg(val):
@@ -39,129 +99,252 @@ def to_mm_reg(val):
 def to_xmm_reg(val):
     return "XMM{}".format(val)
 
-def modrm2reg8(data, idx):
+
+def extract_32bit_disp(data, idx):
+    disp = data[idx] + (data[idx+1] << 8) + (data[idx+2] << 16) + (data[idx+3] << 24)
+    if disp > 0x7fffffff: # Word is signed!
+        disp = disp - 0x100000000
+    return disp, idx + 4
+
+
+def extract_16bit_disp(data, idx):
+    disp = data[idx] + (data[idx+1] << 8)
+    if disp > 0x7fff: # Word is signed!
+        disp = disp - 0x10000
+    return disp, idx + 2
+
+
+def extract_8bit_disp(data, idx):
+    disp = data[idx]
+    if disp > 0x7f:   # Byte is signed!
+        disp = disp - 0x100
+    return disp, idx + 1
+
+
+def modrm2reg8(arch, data, idx):
     """For Opcodes where the ModR/M defs two 8 bit operands"""
     modrm = data[idx]
     mod = modrm & 0xc0
-    op1_code = modrm & 7
+    op2_code = modrm & 7
+    idx += 1
+    disp = None
     if mod == 0x00:
-        if op1_code == 6:
-            disp = data[idx+1] + data[idx+2] * 256
-            idx += 2
-            op1 = "[{}]".format(disp)
-        else:
-            op1 = to_indirect(op1_code)
+        if arch.addr_size == 16:
+            if op2_code == 6:
+                disp, idx = extract_16bit_disp(data, idx)
+                op2 = "({})".format(disp)
+            else:
+                op2 = to_indirect(arch, op2_code, disp)
+        elif arch.addr_size == 32:
+            if op2_code == 5:
+                disp, idx = extract_32bit_disp(data, idx)
+                op2 = "({})".format(disp)
+            else:
+                if op2_code == 4:
+                    sib = data[idx]
+                    idx += 1
+                op2 = to_indirect(arch, op2_code, disp)
     elif mod == 0x40:
+        if (arch.addr_size == 32) and (op2_code == 5):
+            sib = data[idx]
+            idx += 1
         # 8 bit displacement
-        disp = data[idx+1]
-        if disp > 127:   # Byte is signed!
-            disp = disp - 256
-        op1 = to_indirect(op1_code) + "+[{}]".format(disp)
-        idx += 1
+        disp, idx = extract_8bit_disp(data, idx)
+        op2 = to_indirect(arch, op2_code, disp)
     elif mod == 0x80:
-        # 16 bit displacement
-        disp = data[idx+1] + data[idx+2] * 256
-        if disp > 32767: # Word is signed!
-            disp = disp - 65536
-        op1 = to_indirect(op1_code) + "+{}".format(disp)
-        idx += 2
+        if arch.addr_size == 16:
+            # 16 bit displacement
+            disp, idx = extract_16bit_disp(data, idx)
+        elif arch.addr_size == 32:
+            if op2_code == 4:
+                sib = data[idx]
+                idx += 1
+            disp, idx = extract_32bit_disp(data, idx)
+        op2 = to_indirect(arch, op2_code, disp)
     elif mod == 0xc0:
-        op1 = to_r8_reg(op1_code)
-    op2 = to_r8_reg((modrm & 0x38) >> 3)
-    return idx+1, (op1, op2)
+        op2 = to_r8_reg(op2_code)
+    op1 = to_r8_reg((modrm & 0x38) >> 3)
+    return idx, (op1, op2)
 
 
-def modrm2reg16_32(data, idx):
-    pass
+def rev_modrm2reg8(arch, data, idx):
+    idx, ops = modrm2reg8(arch, data, idx)
+    return idx, (ops[1], ops[0])
 
-def opcode2reg16_32(data, idx):
+
+def modrm2reg16_32(arch, data, idx):
+    modrm = data[idx]
+    mod = modrm & 0xc0
+    op2_code = modrm & 7
+    idx += 1
+    disp = None
+    if mod == 0x00:
+        if arch.addr_size == 16:
+            if op2_code == 6:
+                disp, idx = extract_16bit_disp(data, idx)
+                op2 = "({})".format(disp)
+            else:
+                op2 = to_indirect(arch, op2_code, disp)
+        elif arch.addr_size == 32:
+            if op2_code == 5:
+                disp, idx = extract_32bit_disp(data, idx)
+                op2 = "({})".format(disp)
+            else:
+                if op2_code == 4:
+                    sib = data[idx]
+                    idx += 1
+                op2 = to_indirect(arch, op2_code, disp)
+    elif mod == 0x40:
+        if (arch.addr_size == 32) and (op2_code == 5):
+            sib = data[idx]
+            idx += 1
+        # 8 bit displacement
+        disp, idx = extract_8bit_disp(data, idx)
+        op2 = to_indirect(arch, op2_code, disp)
+    elif mod == 0x80:
+        if arch.addr_size == 16:
+            # 16 bit displacement
+            disp, idx = extract_16bit_disp(data, idx)
+        elif arch.addr_size == 32:
+            if op2_code == 4:
+                sib = data[idx]
+                idx += 1
+            disp, idx = extract_32bit_disp(data, idx)
+        op2 = to_indirect(arch, op2_code, disp)
+    elif mod == 0xc0:
+        op2 = to_r16_32_reg(arch, op2_code)
+    op1 = to_r16_32_reg(arch, (modrm & 0x38) >> 3)
+    return idx, (op1, op2)
+
+
+def rev_modrm2reg16_32(arch, data, idx):
+    idx, ops = modrm2reg16_32(arch, data, idx)
+    return idx, (ops[1], ops[0])
+
+
+def imm2al(arch, data, idx):
+    disp, idx = extract_8bit_disp(data, idx)
+    return idx, ("${}".format(disp), "%al")
+
+
+def imm2ax(arch, data, idx):
+    if arch.data_size == 32:
+        disp, idx = extract_32bit_disp(data, idx)
+        op2 = "%eax"
+    else:
+        disp, idx = extract_16bit_disp(data, idx)
+        op2 = "%ax"
+    return idx, ("${}".format(disp), op2)
+
+
+def reg_es(arch, data, idx):
+    return idx, ("%es", None)
+
+
+def reg_cs(arch, data, idx):
+    return idx, ("%cs", None)
+
+
+def reg_ss(arch, data, idx):
+    return idx, ("%ss", None)
+
+
+def reg_ds(arch, data, idx):
+    return idx, ("%ds", None)
+
+
+def reg_al(arch, data, idx):
+    return idx, ("%al", None)
+
+
+def opcode2reg16_32(arch, data, idx):
     """For Opcodes where last 3 bits encode the register"""
     #e.g. POP EAX
     val = data[idx-1] & 0x7
     if cpu_width == 16:
         return to_r8_reg(val)
-    return to_r16_reg(val), idx
+    return to_r16_32_reg(arch, val), idx
 
 
-one_byte_opcodes = (
+ONE_BYTE_OPCODES = (
     # 0x00 - 0x0f
-    ("ADD", modrm2reg8),
-    ("ADD", modrm2reg16_32),
-    ("ADD",),
-    ("ADD",),
-    ("ADD",),
-    ("ADD",),
-    ("PUSH",),
-    ("POP",),
-    ("OR",),
-    ("OR",),
-    ("OR",),
-    ("OR",),
-    ("OR",),
-    ("OR",),
-    ("PUSH",),
+    ("add", modrm2reg8),
+    ("add", modrm2reg16_32),
+    ("add", rev_modrm2reg8),
+    ("add", rev_modrm2reg16_32),
+    ("add", imm2al),
+    ("add", imm2ax),
+    ("push", reg_es),
+    ("pop", reg_es),
+    ("or", modrm2reg8),
+    ("or", modrm2reg16_32),
+    ("or", rev_modrm2reg8),
+    ("or", rev_modrm2reg16_32),
+    ("or", imm2al),
+    ("or", imm2ax),
+    ("push", reg_cs),
     None, # 0x0f - Two byte prefix
     # 0x10 - 0x1f
-    ("ADC",),
-    ("ADC",),
-    ("ADC",),
-    ("ADC",),
-    ("ADC",),
-    ("ADC",),
-    ("PUSH",),
-    ("POP",),
-    ("SBB",),
-    ("SBB",),
-    ("SBB",),
-    ("SBB",),
-    ("SBB",),
-    ("SBB",),
-    ("PUSH",),
-    ("POP",),
+    ("adc", modrm2reg8),
+    ("adc", modrm2reg16_32),
+    ("adc", rev_modrm2reg8),
+    ("adc", rev_modrm2reg16_32),
+    ("adc", imm2al),
+    ("adc", imm2ax),
+    ("push", reg_ss),
+    ("pop", reg_ss),
+    ("sbb", modrm2reg8),
+    ("sbb", modrm2reg16_32),
+    ("sbb", rev_modrm2reg8),
+    ("sbb", rev_modrm2reg16_32),
+    ("sbb", imm2al),
+    ("sbb", imm2ax),
+    ("push", reg_ds),
+    ("pop", reg_ds),
     # 0x20 - 0x2f
-    ("AND",),
-    ("AND",),
-    ("AND",),
-    ("AND",),
-    ("AND",),
-    ("AND",),
+    ("and", modrm2reg8),
+    ("and", modrm2reg16_32),
+    ("and", rev_modrm2reg8),
+    ("and", rev_modrm2reg16_32),
+    ("and", imm2al),
+    ("and", imm2ax),
     None, # 0x26 - ES Override
-    ("DAA",),
-    ("SUB",),
-    ("SUB",),
-    ("SUB",),
-    ("SUB",),
-    ("SUB",),
-    ("SUB",),
+    ("daa", reg_al),
+    ("sub", modrm2reg8),
+    ("sub", modrm2reg16_32),
+    ("sub", rev_modrm2reg8),
+    ("sub", rev_modrm2reg16_32),
+    ("sub", imm2al),
+    ("sub", imm2ax),
     None, # 0x2E - CS Override
-    ("DAS",),
+    ("das", reg_al),
     # 0x30 - 0x3f
-    ("XOR",),
-    ("XOR",),
-    ("XOR",),
-    ("XOR",),
-    ("XOR",),
-    ("XOR",),
+    ("xor", modrm2reg8),
+    ("xor", modrm2reg16_32),
+    ("xor", rev_modrm2reg8),
+    ("xor", rev_modrm2reg16_32),
+    ("xor", imm2al),
+    ("xor", imm2ax),
     None, # 0x36 - SS Override
-    ("AAA",),
-    ("CMP",),
-    ("CMP",),
-    ("CMP",),
-    ("CMP",),
-    ("CMP",),
-    ("CMP",),
+    ("aaa", reg_al),
+    ("cmp", modrm2reg8),
+    ("cmp", modrm2reg16_32),
+    ("cmp", rev_modrm2reg8),
+    ("cmp", rev_modrm2reg16_32),
+    ("cmp", imm2al),
+    ("cmp", imm2ax),
     None, # 0x3E - DS Override
-    ("AAS",),
+    ("aas", reg_al),
     # 0x40 - 0x4f
-    ("INC",),
-    ("INC",),
-    ("INC",),
-    ("INC",),
-    ("INC",),
-    ("INC",),
-    ("INC",),
-    ("INC",),
-    ("DEC",),
+    ("inc",),
+    ("inc",),
+    ("inc",),
+    ("inc",),
+    ("inc",),
+    ("inc",),
+    ("inc",),
+    ("inc",),
+    ("dec",),
     ("DEC",),
     ("DEC",),
     ("DEC",),
@@ -347,7 +530,7 @@ one_byte_opcodes = (
     (("INC","DEC","INC","DEC","CALL","CALLF","JMP","JMPF","PUSH"),),
 )
 
-def decode(data):
+def decode(arch, data):
     # Do prefixes
     seg_override = 0
     lock_prefix = False
@@ -367,9 +550,9 @@ def decode(data):
         elif octet == 0x65:
             seg_override = GS_OVERRIDE
         elif octet == 0x66:
-            logger.warn("Fix Op override")
+            arch.data_size = 16 if arch.data_size == 32 else 32
         elif octet == 0x67:
-            logger.warn("Fix Addr override")
+            arch.addr_size = 16 if arch.addr_size == 32 else 32
         elif octet == 0xf0:
             lock_prefix = True
         elif octet == 0xf2:
@@ -380,9 +563,13 @@ def decode(data):
             break
     else:
         logger.error("Too many prefixes")
+    idx += 1
 
     if octet == 0x0f:
         # Two byte opcode
         pass
     else:
+        mnemonic, operand_fn = ONE_BYTE_OPCODES[octet]
+        idx, ops = operand_fn(arch, data, idx)
+        return "{} {},{}".format(mnemonic, ops[0], ops[1])
         pass
