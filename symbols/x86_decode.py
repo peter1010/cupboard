@@ -68,6 +68,28 @@ INDIRECT_32BIT = (
     "(%edi)"
 )
 
+INDIRECT_64BIT = (
+    "(%rax)",
+    "(%rcx)",
+    "(%rdx)",
+    "(%rbx)",
+    None, # SIB
+    "(%rip) (%rbp)",    # Depends on MOD bits :)
+    "(%rsi)",
+    "(%rdi)"
+)
+
+REX_INDIRECT_64BIT = (
+    "(%r8)",
+    "(%r9)",
+    "(%r10)",
+    "(%r11)",
+    None, # SIB
+    "(%rip) (%r13",     # Depends on MOD bits :)
+    "(%r14)",
+    "(%r15)"
+)
+
 
 def to_indirect(arch, val, disp):
     if arch.addr_size == 16:
@@ -80,7 +102,32 @@ def to_indirect(arch, val, disp):
         return "{}{}".format(disp, regs)
     else:
         return regs
+    
+SIB_BASE_REG = (
+    "%eax",
+    "%ecx",
+    "%edx",
+    "%ebx",
+    "%esp",
+    None,
+    "%es1",
+    "%edi"
+)
 
+def to_indirect_sib(arch, val, disp):
+    scale = 1 << (val >> 6)
+    offset = INDIRECT_32REG((val & 0x38) >> 3)
+    base = SIB_BASE_REG(val & 7)
+    if disp:
+        if scale > 1:
+            return "{}({},{},{})".format(disp, base, offset, scale)
+        else:
+            return "{}({},{})".format(disp, base, offset)
+    else:
+        if scale > 1:
+            return "({},{},{})".format(base, offset, scale)
+        else:
+            return "({},{})".format(base, offset)
 
 def to_r16_32_reg(arch, val):
     if arch.data_size == 32:
@@ -121,46 +168,72 @@ def extract_8bit_disp(data, idx):
     return disp, idx + 1
 
 
+def mod00(arch, op2_code, data, idx):
+    # Do the Effective address element from the 16-bit / 32-bit
+    # ModR/M Byte given mod val 0
+    if arch.addr_size == 16:
+        if op2_code == 6:
+            disp, idx = extract_16bit_disp(data, idx)
+            op2 = "({})".format(disp)
+        else:
+            op2 = to_indirect(arch, op2_code, None)
+    elif arch.addr_size == 32:
+        if op2_code == 5:
+            disp, idx = extract_32bit_disp(data, idx)
+            op2 = "({})".format(disp)
+        elif op2_code == 4:
+            sib = data[idx]
+            idx += 1
+            op2 = to_indirect_sib(arch, sib, None)
+        else:
+            op2 = to_indirect(arch, op2_code, None)
+    return idx, op2
+
+
+def mod01(arch, op2_code, data, idx):
+    # Do the Effective address element from the 16-bit / 32-bit
+    # ModR/M Byte given mod val 01
+    if (arch.addr_size == 32) and (op2_code == 5):
+        sib = data[idx]
+        idx += 1
+        op2 = to_indirect_sib(arch, sib, None)
+    else:
+        # 8 bit displacement
+        disp, idx = extract_8bit_disp(data, idx)
+        op2 = to_indirect(arch, op2_code, disp)
+    return idx, op2
+
+
+def mod10(arch, op2_code, data, idx):
+    # Do the Effective address element from the 16-bit / 32-bit
+    # ModR/M Byte given mod val 10
+    if arch.addr_size == 16:
+        # 16 bit displacement
+        disp, idx = extract_16bit_disp(data, idx)
+        op2 = to_indirect(arch, op2_code, disp)
+    elif arch.addr_size == 32:
+        if op2_code == 4:
+            sib = data[idx]
+            idx += 1
+            op2 = to_indirect_sib(arch, sib, None)
+        else:
+            disp, idx = extract_32bit_disp(data, idx)
+            op2 = to_indirect(arch, op2_code, disp)
+    return idx, op2
+ 
+
 def modrm2reg8(arch, data, idx):
     """For Opcodes where the ModR/M defs two 8 bit operands"""
     modrm = data[idx]
     mod = modrm & 0xc0
     op2_code = modrm & 7
     idx += 1
-    disp = None
     if mod == 0x00:
-        if arch.addr_size == 16:
-            if op2_code == 6:
-                disp, idx = extract_16bit_disp(data, idx)
-                op2 = "({})".format(disp)
-            else:
-                op2 = to_indirect(arch, op2_code, disp)
-        elif arch.addr_size == 32:
-            if op2_code == 5:
-                disp, idx = extract_32bit_disp(data, idx)
-                op2 = "({})".format(disp)
-            else:
-                if op2_code == 4:
-                    sib = data[idx]
-                    idx += 1
-                op2 = to_indirect(arch, op2_code, disp)
+        idx, op2 = mod00(arch, op2_code, data, idx)
     elif mod == 0x40:
-        if (arch.addr_size == 32) and (op2_code == 5):
-            sib = data[idx]
-            idx += 1
-        # 8 bit displacement
-        disp, idx = extract_8bit_disp(data, idx)
-        op2 = to_indirect(arch, op2_code, disp)
+        idx, op2 = mod01(arch, op2_code, data, idx)
     elif mod == 0x80:
-        if arch.addr_size == 16:
-            # 16 bit displacement
-            disp, idx = extract_16bit_disp(data, idx)
-        elif arch.addr_size == 32:
-            if op2_code == 4:
-                sib = data[idx]
-                idx += 1
-            disp, idx = extract_32bit_disp(data, idx)
-        op2 = to_indirect(arch, op2_code, disp)
+        idx, op2 = mod10(arch, op2_code, data, idx)
     elif mod == 0xc0:
         op2 = to_r8_reg(op2_code)
     op1 = to_r8_reg((modrm & 0x38) >> 3)
@@ -177,40 +250,12 @@ def modrm2reg16_32(arch, data, idx):
     mod = modrm & 0xc0
     op2_code = modrm & 7
     idx += 1
-    disp = None
     if mod == 0x00:
-        if arch.addr_size == 16:
-            if op2_code == 6:
-                disp, idx = extract_16bit_disp(data, idx)
-                op2 = "({})".format(disp)
-            else:
-                op2 = to_indirect(arch, op2_code, disp)
-        elif arch.addr_size == 32:
-            if op2_code == 5:
-                disp, idx = extract_32bit_disp(data, idx)
-                op2 = "({})".format(disp)
-            else:
-                if op2_code == 4:
-                    sib = data[idx]
-                    idx += 1
-                op2 = to_indirect(arch, op2_code, disp)
+        idx, op2 = mod00(arch, op2_code, data, idx)
     elif mod == 0x40:
-        if (arch.addr_size == 32) and (op2_code == 5):
-            sib = data[idx]
-            idx += 1
-        # 8 bit displacement
-        disp, idx = extract_8bit_disp(data, idx)
-        op2 = to_indirect(arch, op2_code, disp)
+        idx, op2 = mod01(arch, op2_code, data, idx)
     elif mod == 0x80:
-        if arch.addr_size == 16:
-            # 16 bit displacement
-            disp, idx = extract_16bit_disp(data, idx)
-        elif arch.addr_size == 32:
-            if op2_code == 4:
-                sib = data[idx]
-                idx += 1
-            disp, idx = extract_32bit_disp(data, idx)
-        op2 = to_indirect(arch, op2_code, disp)
+        idx, op2 = mod10(arch, op2_code, data, idx)
     elif mod == 0xc0:
         op2 = to_r16_32_reg(arch, op2_code)
     op1 = to_r16_32_reg(arch, (modrm & 0x38) >> 3)
@@ -255,6 +300,23 @@ def reg_ds(arch, data, idx):
 
 def reg_al(arch, data, idx):
     return idx, ("%al", None)
+
+def reg_e_ax(arch, data, idx):
+    if arch.data_size == 32:
+        return "%eax"
+    return "%ax"
+
+def reg_e_cx(arch, data, idx):
+    if arch.data_size == 32:
+        return "%ecx"
+    return "%cx"
+
+#    "%dx",  # Lower 16 bite of D
+#    "%bx",  # Lower 16 bits of B
+#    "%sp",  # Stack pointer (16 bits)
+#    "%bp",  # Base Pointer (16 bits)
+#    "%si",  # Address reg (16 bits)
+#    "%di"   # Address reg (16 bits)
 
 
 def opcode2reg16_32(arch, data, idx):
@@ -336,8 +398,8 @@ ONE_BYTE_OPCODES = (
     None, # 0x3E - DS Override
     ("aas", reg_al),
     # 0x40 - 0x4f
-    ("inc",),
-    ("inc",),
+    ("inc", reg_e_ax),
+    ("inc", reg_e_cx),
     ("inc",),
     ("inc",),
     ("inc",),
