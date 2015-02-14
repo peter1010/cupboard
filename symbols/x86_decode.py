@@ -7,6 +7,8 @@ ES_OVERRIDE=1
 CS_OVERRIDE=2
 SS_OVERRIDE=3
 DS_OVERRIDE=4
+FS_OVERRIDE=5
+GS_OVERRIDE=6
 
 
 REGS_8BIT = (
@@ -91,10 +93,10 @@ REX_INDIRECT_64BIT = (
 )
 
 
-def to_indirect(arch, val, disp):
-    if arch.addr_size == 16:
+def to_indirect(instr, val, disp):
+    if instr.addr_mode == 16:
         regs = INDIRECT_16BIT[val]
-    elif arch.addr_size == 32:
+    elif instr.addr_mode == 32:
         regs = INDIRECT_32BIT[val]
     else:
         regs = INDIRECT_64BIT[val]
@@ -114,9 +116,43 @@ SIB_BASE_REG = (
     "%edi"
 )
 
-def to_indirect_sib(arch, val, disp):
+_SIZE_OVERRIDE = {
+   16: 32,
+   32: 16,
+   64: 32
+}
+
+class Instruction:
+
+    def __init__(self, arch):
+        self.mode = arch.mode
+        self.addr_mode = arch.mode
+        self.data_mode = arch.mode
+        self.lock = ""
+
+    def set_addr_override(self):
+        self.addr_mode = _SIZE_OVERRIDE[self.mode]
+
+    def set_data_override(self):
+        self.data_mode = _SIZE_OVERRIDE[self.mode]
+        if self.mode == 64:
+            logger.warn("Need to fix for long mode!") 
+
+    def set_seg_override(self, seg_override):
+        self.seg_override = seg_override
+
+    def set_rex(self, octet):
+        self.rex = octet
+
+    def swap_operands(self):
+        self.op1, self.op2 = self.op2, self.op1
+
+    def set_lock_prefix(self):
+        self.lock = "lock "
+
+def to_indirect_sib(instr, val, disp):
     scale = 1 << (val >> 6)
-    offset = INDIRECT_32REG((val & 0x38) >> 3)
+    offset = INDIRECT_32BIT((val & 0x38) >> 3)
     base = SIB_BASE_REG(val & 7)
     if disp:
         if scale > 1:
@@ -129,8 +165,8 @@ def to_indirect_sib(arch, val, disp):
         else:
             return "({},{})".format(base, offset)
 
-def to_r16_32_reg(arch, val):
-    if arch.data_size == 32:
+def to_r16_32_reg(instr, val):
+    if instr.data_mode == 32:
         return REGS_32BIT[val]
     return REGS_16BIT[val]
 
@@ -168,164 +204,175 @@ def extract_8bit_disp(data, idx):
     return disp, idx + 1
 
 
-def mod00(arch, op2_code, data, idx):
+def mod00(instr, op2_code, data, idx):
     # Do the Effective address element from the 16-bit / 32-bit
     # ModR/M Byte given mod val 0
-    if arch.addr_size == 16:
+    if instr.addr_mode == 16:
         if op2_code == 6:
             disp, idx = extract_16bit_disp(data, idx)
             op2 = "({})".format(disp)
         else:
-            op2 = to_indirect(arch, op2_code, None)
-    elif arch.addr_size == 32:
+            op2 = to_indirect(instr, op2_code, None)
+    elif instr.addr_mode == 32:
         if op2_code == 5:
             disp, idx = extract_32bit_disp(data, idx)
             op2 = "({})".format(disp)
         elif op2_code == 4:
             sib = data[idx]
             idx += 1
-            op2 = to_indirect_sib(arch, sib, None)
+            op2 = to_indirect_sib(instr, sib, None)
         else:
-            op2 = to_indirect(arch, op2_code, None)
-    return idx, op2
+            op2 = to_indirect(instr, op2_code, None)
+    instr.op2 = op2
+    return idx
 
 
-def mod01(arch, op2_code, data, idx):
+def mod01(instr, op2_code, data, idx):
     # Do the Effective address element from the 16-bit / 32-bit
     # ModR/M Byte given mod val 01
-    if (arch.addr_size == 32) and (op2_code == 5):
+    if (instr.addr_mode == 32) and (op2_code == 5):
         sib = data[idx]
         idx += 1
-        op2 = to_indirect_sib(arch, sib, None)
+        op2 = to_indirect_sib(instr, sib, None)
     else:
         # 8 bit displacement
         disp, idx = extract_8bit_disp(data, idx)
-        op2 = to_indirect(arch, op2_code, disp)
-    return idx, op2
+        op2 = to_indirect(instr, op2_code, disp)
+    instr.op2 = op2
+    return idx
 
 
-def mod10(arch, op2_code, data, idx):
+def mod10(instr, op2_code, data, idx):
     # Do the Effective address element from the 16-bit / 32-bit
     # ModR/M Byte given mod val 10
-    if arch.addr_size == 16:
+    if instr.addr_mode == 16:
         # 16 bit displacement
         disp, idx = extract_16bit_disp(data, idx)
-        op2 = to_indirect(arch, op2_code, disp)
-    elif arch.addr_size == 32:
+        op2 = to_indirect(instr, op2_code, disp)
+    elif instr.addr_mode == 32:
         if op2_code == 4:
             sib = data[idx]
             idx += 1
-            op2 = to_indirect_sib(arch, sib, None)
+            op2 = to_indirect_sib(instr, sib, None)
         else:
             disp, idx = extract_32bit_disp(data, idx)
-            op2 = to_indirect(arch, op2_code, disp)
-    return idx, op2
+            op2 = to_indirect(instr, op2_code, disp)
+    instr.op2 = op2
+    return idx
  
 
-def modrm2reg8(arch, data, idx):
+def modrm2reg8(instr, data, idx):
     """For Opcodes where the ModR/M defs two 8 bit operands"""
     modrm = data[idx]
     mod = modrm & 0xc0
     op2_code = modrm & 7
     idx += 1
     if mod == 0x00:
-        idx, op2 = mod00(arch, op2_code, data, idx)
+        idx = mod00(instr, op2_code, data, idx)
     elif mod == 0x40:
-        idx, op2 = mod01(arch, op2_code, data, idx)
+        idx = mod01(instr, op2_code, data, idx)
     elif mod == 0x80:
-        idx, op2 = mod10(arch, op2_code, data, idx)
+        idx = mod10(instr, op2_code, data, idx)
     elif mod == 0xc0:
-        op2 = to_r8_reg(op2_code)
-    op1 = to_r8_reg((modrm & 0x38) >> 3)
-    return idx, (op1, op2)
+        instr.op2 = to_r8_reg(op2_code)
+    instr.op1 = to_r8_reg((modrm & 0x38) >> 3)
+    return idx
 
 
-def rev_modrm2reg8(arch, data, idx):
-    idx, ops = modrm2reg8(arch, data, idx)
-    return idx, (ops[1], ops[0])
+def rev_modrm2reg8(instr, data, idx):
+    idx = modrm2reg8(instr, data, idx)
+    instr.swap_operands()
+    return idx
 
 
-def modrm2reg16_32(arch, data, idx):
+def modrm2reg16_32(instr, data, idx):
     modrm = data[idx]
     mod = modrm & 0xc0
     op2_code = modrm & 7
     idx += 1
     if mod == 0x00:
-        idx, op2 = mod00(arch, op2_code, data, idx)
+        idx = mod00(instr, op2_code, data, idx)
     elif mod == 0x40:
-        idx, op2 = mod01(arch, op2_code, data, idx)
+        idx = mod01(instr, op2_code, data, idx)
     elif mod == 0x80:
-        idx, op2 = mod10(arch, op2_code, data, idx)
+        idx = mod10(instr, op2_code, data, idx)
     elif mod == 0xc0:
-        op2 = to_r16_32_reg(arch, op2_code)
-    op1 = to_r16_32_reg(arch, (modrm & 0x38) >> 3)
-    return idx, (op1, op2)
+        instr.op2 = to_r16_32_reg(instr, op2_code)
+    instr.op1 = to_r16_32_reg(instr, (modrm & 0x38) >> 3)
+    return idx
 
 
-def rev_modrm2reg16_32(arch, data, idx):
-    idx, ops = modrm2reg16_32(arch, data, idx)
-    return idx, (ops[1], ops[0])
+def rev_modrm2reg16_32(instr, data, idx):
+    idx = modrm2reg16_32(instr, data, idx)
+    instr.swap_operands()
+    return idx
 
 
-def imm2al(arch, data, idx):
+def imm2al(instr, data, idx):
     disp, idx = extract_8bit_disp(data, idx)
-    return idx, ("${}".format(disp), "%al")
+    instr.op1 = "${}".format(disp)
+    instr.op2 = "%al"
+    return idx
 
 
-def imm2ax(arch, data, idx):
-    if arch.data_size == 32:
+def imm2ax(instr, data, idx):
+    if instr.data_mode == 32:
         disp, idx = extract_32bit_disp(data, idx)
-        op2 = "%eax"
+        instr.op2 = "%eax"
     else:
         disp, idx = extract_16bit_disp(data, idx)
-        op2 = "%ax"
-    return idx, ("${}".format(disp), op2)
+        instr.op2 = "%ax"
+    instr.op1 = "${}".format(disp)
+    return idx
 
 
-def reg_es(arch, data, idx):
+def reg_es(instr, data, idx):
     return idx, ("%es", None)
 
 
-def reg_cs(arch, data, idx):
-    return idx, ("%cs", None)
+def reg_cs(instr, data, idx):
+    instr.op1 = "%cs"
+    return idx
 
 
-def reg_ss(arch, data, idx):
-    return idx, ("%ss", None)
+def reg_ss(instr, data, idx):
+    instr.op1 = "%ss"
+    return idx
 
 
-def reg_ds(arch, data, idx):
-    return idx, ("%ds", None)
+def reg_ds(instr, data, idx):
+    instr.op1 = "%ds"
+    return idx
 
 
-def reg_al(arch, data, idx):
-    return idx, ("%al", None)
-
-def reg_e_ax(arch, data, idx):
-    if arch.data_size == 32:
-        return "%eax"
-    return "%ax"
-
-def reg_e_cx(arch, data, idx):
-    if arch.data_size == 32:
-        return "%ecx"
-    return "%cx"
-
-#    "%dx",  # Lower 16 bite of D
-#    "%bx",  # Lower 16 bits of B
-#    "%sp",  # Stack pointer (16 bits)
-#    "%bp",  # Base Pointer (16 bits)
-#    "%si",  # Address reg (16 bits)
-#    "%di"   # Address reg (16 bits)
+def reg_al(instr, data, idx):
+    instr.op1 = "%al"
+    return idx
 
 
-def opcode2reg16_32(arch, data, idx):
-    """For Opcodes where last 3 bits encode the register"""
-    #e.g. POP EAX
-    val = data[idx-1] & 0x7
-    if cpu_width == 16:
-        return to_r8_reg(val)
-    return to_r16_32_reg(arch, val), idx
+def reg_e_ax(instr, data, idx):
+    return to_r16_32_reg(instr, 0)
+
+def reg_e_cx(instr, data, idx):
+    return to_r16_32_reg(instr, 1)
+
+def reg_e_dx(instr, data, idx):
+    return to_r16_32_reg(instr, 2)
+
+def reg_e_bx(instr, data, idx):
+    return to_r16_32_reg(instr, 3)
+
+def reg_e_sp(instr, data, idx):
+    return to_r16_32_reg(instr, 4)
+
+def reg_e_bp(instr, data, idx):
+    return to_r16_32_reg(instr, 5)
+
+def reg_e_si(instr, data, idx):
+    return to_r16_32_reg(instr, 6)
+
+def reg_e_di(instr, data, idx):
+    return to_r16_32_reg(instr, 7)
 
 
 ONE_BYTE_OPCODES = (
@@ -400,42 +447,40 @@ ONE_BYTE_OPCODES = (
     # 0x40 - 0x4f
     ("inc", reg_e_ax),
     ("inc", reg_e_cx),
-    ("inc",),
-    ("inc",),
-    ("inc",),
-    ("inc",),
-    ("inc",),
-    ("inc",),
-    ("dec",),
-    ("DEC",),
-    ("DEC",),
-    ("DEC",),
-    ("DEC",),
-    ("DEC",),
-    ("DEC",),
-    ("DEC",),
+    ("inc", reg_e_dx),
+    ("inc", reg_e_bx),
+    ("inc", reg_e_sp),
+    ("inc", reg_e_bp),
+    ("inc", reg_e_si),
+    ("dec", reg_e_ax),
+    ("dec", reg_e_cx),
+    ("dec", reg_e_dx),
+    ("dec", reg_e_bx),
+    ("dec", reg_e_sp),
+    ("dec", reg_e_bp),
+    ("dec", reg_e_si),
+    ("dec", reg_e_di),
+    ("dec", reg_e_di),
     # 0x50 - 0x5f
-    ("PUSH", opcode2reg16_32),
-    ("PUSH", opcode2reg16_32),
-    ("PUSH", opcode2reg16_32),
-    ("PUSH", opcode2reg16_32),
-    ("PUSH", opcode2reg16_32),
-    ("PUSH", opcode2reg16_32),
-    ("PUSH", opcode2reg16_32),
-    ("PUSH", opcode2reg16_32),
-    ("POP", opcode2reg16_32),
-    ("POP", opcode2reg16_32),
-    ("POP", opcode2reg16_32),
-    ("POP", opcode2reg16_32),
-    ("POP", opcode2reg16_32),
-    ("POP", opcode2reg16_32),
-    ("POP", opcode2reg16_32),
-    ("POP", opcode2reg16_32),
+    ("push", reg_e_ax),
+    ("push", reg_e_cx),
+    ("push", reg_e_dx),
+    ("push", reg_e_bx),
+    ("push", reg_e_sp),
+    ("push", reg_e_bp),
+    ("push", reg_e_si),
+    ("pop", reg_e_ax),
+    ("pop", reg_e_cx),
+    ("pop", reg_e_dx),
+    ("pop", reg_e_bx),
+    ("pop", reg_e_sp),
+    ("pop", reg_e_bp),
+    ("pop", reg_e_si),
     # 0x60 - 0x6f
-    ("PUSHA",),
-    ("POPA",),
-    ("BOUND",),
-    ("ARPL",),
+    ("pusha", None),
+    ("popa", None),
+    ("bound",),
+    ("arpl",),
     None, # 0x64 - FS Override
     None, # 0x65 - GS Overide
     None, # 0x66 - Operand/Precision-size override
@@ -593,6 +638,7 @@ ONE_BYTE_OPCODES = (
 )
 
 def decode(arch, data):
+    instr = Instruction(arch)
     # Do prefixes
     seg_override = 0
     lock_prefix = False
@@ -600,31 +646,38 @@ def decode(arch, data):
     for idx in range(16):
         octet = data[idx]
         if octet == 0x26:
-            seg_override = ES_OVERRIDE
+            instr.set_seg_override(ES_OVERRIDE)
         elif octet == 0x2e:
-            seg_override = CS_OVERRIDE
+            instr.set_seg_override(CS_OVERRIDE)
         elif octet == 0x36:
-            seg_override = SS_OVERRIDE
+            instr.set_seg_override(SS_OVERRIDE)
         elif octet == 0x3e:
-            seg_override = DS_OVERRIDE
+            instr.set_seg_override(DS_OVERRIDE)
         elif octet == 0x64:
-            seg_override = FS_OVERRIDE
+            instr.set_seg_override(FS_OVERRIDE)
         elif octet == 0x65:
-            seg_override = GS_OVERRIDE
+            instr.set_seg_override(GS_OVERRIDE)
         elif octet == 0x66:
-            arch.data_size = 16 if arch.data_size == 32 else 32
+            instr.set_data_override()
         elif octet == 0x67:
-            arch.addr_size = 16 if arch.addr_size == 32 else 32
+            instr.set_addr_override()
         elif octet == 0xf0:
-            lock_prefix = True
+            instr.set_lock_prefix()
         elif octet == 0xf2:
-            rep_prefix = REPNZ
+            instr.rep_prefix = -1 # REPNZ
         elif octet == 0xf3:
-            rep_prefix = REPZ
+            instr.rep_prefix = +1 # REPZ
         else:
             break
     else:
         logger.error("Too many prefixes")
+
+    if (instr.mode == 64) and ((octet >= 0x40) or (octet <= 0x4f)):
+        instr.set_rex(octet)
+        idx += 1
+        octet = data[idx]
+
+    # octet is the operand, step forward ready for next.
     idx += 1
 
     if octet == 0x0f:
@@ -632,6 +685,9 @@ def decode(arch, data):
         pass
     else:
         mnemonic, operand_fn = ONE_BYTE_OPCODES[octet]
-        idx, ops = operand_fn(arch, data, idx)
-        return "{} {},{}".format(mnemonic, ops[0], ops[1])
-        pass
+    instr.mnemonic = mnemonic
+    try:
+        idx = operand_fn(instr, data, idx)
+    except TypeError:
+        raise ValueError
+    return "{}{} {},{}".format(instr.lock, instr.mnemonic, instr.op1, instr.op2), idx
