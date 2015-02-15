@@ -44,9 +44,29 @@ REGS_32BIT = (
     "%edi"
 )
 
+REGS_64BIT = (
+    "%rax",
+    "%rcx",
+    "%rdx",
+    "%rbx",
+    "%rsp",
+    "%rbp",
+    "%rsi",
+    "%rdi",
+    "%r8d",
+    "%r9d",
+    "%r10d",
+    "%r11d",
+    "%r12d",
+    "%r13d",
+    "%r14d",
+    "%r15d"
+)
+
 
 def to_r8_reg(val):
     return REGS_8BIT[val]
+
 
 INDIRECT_16BIT = (
     "%bx,%si",
@@ -64,21 +84,21 @@ INDIRECT_32BIT = (
     "%ecx",
     "%edx",
     "%ebx",
-    "", # SIB
+    None, # SIB, actually gcc puts pseudo register eiz - which is always zero :)
     "%ebp",
     "%esi",
     "%edi"
 )
 
 INDIRECT_64BIT = (
-    "(%rax)",
-    "(%rcx)",
-    "(%rdx)",
-    "(%rbx)",
+    "%rax",
+    "%rcx",
+    "%rdx",
+    "%rbx",
     None, # SIB
-    "(%rip) (%rbp)",    # Depends on MOD bits :)
-    "(%rsi)",
-    "(%rdi)"
+    "%rip (%rbp)",    # Depends on MOD bits :)
+    "%rsi",
+    "%rdi"
 )
 
 REX_INDIRECT_64BIT = (
@@ -93,17 +113,15 @@ REX_INDIRECT_64BIT = (
 )
 
 
-def to_indirect(instr, val, disp):
+def to_indirect(instr, val, disp=""):
     if instr.addr_mode == 16:
         regs = INDIRECT_16BIT[val]
     elif instr.addr_mode == 32:
         regs = INDIRECT_32BIT[val]
     else:
         regs = INDIRECT_64BIT[val]
-    if disp:
-        return "{}({})".format(disp, regs)
-    else:
-        return "({})".format(regs)
+    return "{}({})".format(disp, regs)
+
     
 SIB_BASE_REG = (
     "%eax",
@@ -111,7 +129,7 @@ SIB_BASE_REG = (
     "%edx",
     "%ebx",
     "%esp",
-    "",
+    None,
     "%esi",
     "%edi"
 )
@@ -150,20 +168,38 @@ class Instruction:
     def set_lock_prefix(self):
         self.lock = "lock "
 
-def to_indirect_sib(instr, val, disp=""):
+def to_indirect_sib(instr, val, data, idx):
     scale = 1 << (val >> 6)
     offset = INDIRECT_32BIT[(val & 0x38) >> 3]
     base = SIB_BASE_REG[val & 7]
-    if scale > 1:
-        return "{}({},{},{})".format(disp, base, offset, scale)
-    elif offset:
-        return "{}({},{})".format(disp, base, offset)
+    if base is None:
+        base = ""
+        if scale == 2:
+            disp, idx = extract_8bit_disp(data, idx)
+            base = "%ebp"
+        elif scale == 4:
+            disp, idx = extract_32bit_disp(data, idx)
+            base = "%ebp"
+        else:
+            disp, idx = extract_32bit_disp(data, idx)
     else:
-        return "{}({})".format(disp, base)
+        disp = ""
+    if offset:
+        if scale > 1:
+            op = "{}({},{},{})".format(disp, base, offset, scale)
+        else:
+            op = "{}({},{})".format(disp, base, offset)
+    elif base:
+        op = "{}({})".format(disp, base)
+    else:
+        op = "({})".format(disp)
+    return op, idx
 
 def to_r16_32_reg(instr, val):
     if instr.data_mode == 32:
         return REGS_32BIT[val]
+    elif instr.data_mode == 64:
+        return REGS_64BIT[val]
     return REGS_16BIT[val]
 
 
@@ -208,7 +244,7 @@ def mod00(instr, op2_code, data, idx):
             disp, idx = extract_16bit_disp(data, idx)
             op2 = "({})".format(disp)
         else:
-            op2 = to_indirect(instr, op2_code, None)
+            op2 = to_indirect(instr, op2_code, "")
     elif instr.addr_mode == 32:
         if op2_code == 5:
             disp, idx = extract_32bit_disp(data, idx)
@@ -216,9 +252,9 @@ def mod00(instr, op2_code, data, idx):
         elif op2_code == 4:
             sib = data[idx]
             idx += 1
-            op2 = to_indirect_sib(instr, sib)
+            op2, idx = to_indirect_sib(instr, sib, data, idx)
         else:
-            op2 = to_indirect(instr, op2_code, None)
+            op2 = to_indirect(instr, op2_code, "")
     instr.op2 = op2
     return idx
 
@@ -229,7 +265,7 @@ def mod01(instr, op2_code, data, idx):
     if (instr.addr_mode == 32) and (op2_code == 4):
         sib = data[idx]
         idx += 1
-        op2 = to_indirect_sib(instr, sib)
+        op2, idx = to_indirect_sib(instr, sib, data, idx)
     else:
         # 8 bit displacement
         disp, idx = extract_8bit_disp(data, idx)
@@ -249,7 +285,7 @@ def mod10(instr, op2_code, data, idx):
         if op2_code == 4:
             sib = data[idx]
             idx += 1
-            op2 = to_indirect_sib(instr, sib)
+            op2, idx = to_indirect_sib(instr, sib, data, idx)
         else:
             disp, idx = extract_32bit_disp(data, idx)
             op2 = to_indirect(instr, op2_code, disp)
@@ -323,20 +359,29 @@ def imm2ax(instr, data, idx):
 
 
 def reg_es(instr, data, idx):
-    return idx, ("%es", None)
+    if instr.mode == 64:
+        raise ValueError
+    instr.op1 = "%es"
+    return idx
 
 
 def reg_cs(instr, data, idx):
+    if instr.mode == 64:
+        raise ValueError
     instr.op1 = "%cs"
     return idx
 
 
 def reg_ss(instr, data, idx):
+    if instr.mode == 64:
+        raise ValueError
     instr.op1 = "%ss"
     return idx
 
 
 def reg_ds(instr, data, idx):
+    if instr.mode == 64:
+        raise ValueError
     instr.op1 = "%ds"
     return idx
 
@@ -345,12 +390,18 @@ def reg_al(instr, data, idx):
     instr.op1 = "%al"
     return idx
 
+def append_w(instr, data, idx):
+    if instr.data_mode == 16:
+        instr.mnemonic = instr.mnemonic + "w"
+    return idx
 
 def reg_e_ax(instr, data, idx):
-    return to_r16_32_reg(instr, 0)
+    instr.op1 = to_r16_32_reg(instr, 0)
+    return idx
 
 def reg_e_cx(instr, data, idx):
-    return to_r16_32_reg(instr, 1)
+    instr.op1 = to_r16_32_reg(instr, 1)
+    return idx
 
 def reg_e_dx(instr, data, idx):
     return to_r16_32_reg(instr, 2)
@@ -414,7 +465,7 @@ ONE_BYTE_OPCODES = (
     ("and", imm2al),
     ("and", imm2ax),
     None, # 0x26 - ES Override
-    ("daa", reg_al),
+    ("daa", None),
     ("sub", modrm2reg8),
     ("sub", modrm2reg16_32),
     ("sub", rev_modrm2reg8),
@@ -422,7 +473,7 @@ ONE_BYTE_OPCODES = (
     ("sub", imm2al),
     ("sub", imm2ax),
     None, # 0x2E - CS Override
-    ("das", reg_al),
+    ("das", None),
     # 0x30 - 0x3f
     ("xor", modrm2reg8),
     ("xor", modrm2reg16_32),
@@ -431,7 +482,7 @@ ONE_BYTE_OPCODES = (
     ("xor", imm2al),
     ("xor", imm2ax),
     None, # 0x36 - SS Override
-    ("aaa", reg_al),
+    ("aaa", None),
     ("cmp", modrm2reg8),
     ("cmp", modrm2reg16_32),
     ("cmp", rev_modrm2reg8),
@@ -439,7 +490,7 @@ ONE_BYTE_OPCODES = (
     ("cmp", imm2al),
     ("cmp", imm2ax),
     None, # 0x3E - DS Override
-    ("aas", reg_al),
+    ("aas", None),
     # 0x40 - 0x4f
     ("inc", reg_e_ax),
     ("inc", reg_e_cx),
@@ -448,6 +499,7 @@ ONE_BYTE_OPCODES = (
     ("inc", reg_e_sp),
     ("inc", reg_e_bp),
     ("inc", reg_e_si),
+    ("inc", reg_e_di),
     ("dec", reg_e_ax),
     ("dec", reg_e_cx),
     ("dec", reg_e_dx),
@@ -455,7 +507,6 @@ ONE_BYTE_OPCODES = (
     ("dec", reg_e_sp),
     ("dec", reg_e_bp),
     ("dec", reg_e_si),
-    ("dec", reg_e_di),
     ("dec", reg_e_di),
     # 0x50 - 0x5f
     ("push", reg_e_ax),
@@ -465,6 +516,7 @@ ONE_BYTE_OPCODES = (
     ("push", reg_e_sp),
     ("push", reg_e_bp),
     ("push", reg_e_si),
+    ("push", reg_e_di),
     ("pop", reg_e_ax),
     ("pop", reg_e_cx),
     ("pop", reg_e_dx),
@@ -472,9 +524,10 @@ ONE_BYTE_OPCODES = (
     ("pop", reg_e_sp),
     ("pop", reg_e_bp),
     ("pop", reg_e_si),
+    ("pop", reg_e_di),
     # 0x60 - 0x6f
-    ("pusha", None),
-    ("popa", None),
+    ("pusha", append_w),
+    ("popa", append_w),
     ("bound",),
     ("arpl",),
     None, # 0x64 - FS Override
@@ -682,8 +735,15 @@ def decode(arch, data):
     else:
         mnemonic, operand_fn = ONE_BYTE_OPCODES[octet]
     instr.mnemonic = mnemonic
-    try:
-        idx = operand_fn(instr, data, idx)
-    except TypeError:
-        raise ValueError
-    return "{}{} {},{}".format(instr.lock, instr.mnemonic, instr.op1, instr.op2), idx
+    if operand_fn:
+        try:
+            idx = operand_fn(instr, data, idx)
+        except TypeError:
+            raise ValueError
+    if hasattr(instr, "op2"):
+        return "{}{} {},{}".format(instr.lock, instr.mnemonic, instr.op1, instr.op2), idx
+    elif hasattr(instr, "op1"):
+        return "{}{} {}".format(instr.lock, instr.mnemonic, instr.op1), idx
+    else:
+        return "{}{}".format(instr.lock, instr.mnemonic), idx
+
