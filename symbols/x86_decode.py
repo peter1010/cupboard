@@ -49,25 +49,25 @@ def to_r8_reg(val):
     return REGS_8BIT[val]
 
 INDIRECT_16BIT = (
-    "(%bx,%si)",
-    "(%bx,%di)",
-    "(%bp,%si)",
-    "(%bp,%di)",
-    "(%si)",
-    "(%di)",
-    "(%bp)",
-    "(%bx)"
+    "%bx,%si",
+    "%bx,%di",
+    "%bp,%si",
+    "%bp,%di",
+    "%si",
+    "%di",
+    "%bp",
+    "%bx"
 )
 
 INDIRECT_32BIT = (
-    "(%eax)",
-    "(%ecx)",
-    "(%edx)",
-    "(%ebx)",
-    None, # SIB
-    "(%ebp)",
-    "(%esi)",
-    "(%edi)"
+    "%eax",
+    "%ecx",
+    "%edx",
+    "%ebx",
+    "", # SIB
+    "%ebp",
+    "%esi",
+    "%edi"
 )
 
 INDIRECT_64BIT = (
@@ -101,9 +101,9 @@ def to_indirect(instr, val, disp):
     else:
         regs = INDIRECT_64BIT[val]
     if disp:
-        return "{}{}".format(disp, regs)
+        return "{}({})".format(disp, regs)
     else:
-        return regs
+        return "({})".format(regs)
     
 SIB_BASE_REG = (
     "%eax",
@@ -111,8 +111,8 @@ SIB_BASE_REG = (
     "%edx",
     "%ebx",
     "%esp",
-    None,
-    "%es1",
+    "",
+    "%esi",
     "%edi"
 )
 
@@ -150,20 +150,16 @@ class Instruction:
     def set_lock_prefix(self):
         self.lock = "lock "
 
-def to_indirect_sib(instr, val, disp):
+def to_indirect_sib(instr, val, disp=""):
     scale = 1 << (val >> 6)
-    offset = INDIRECT_32BIT((val & 0x38) >> 3)
-    base = SIB_BASE_REG(val & 7)
-    if disp:
-        if scale > 1:
-            return "{}({},{},{})".format(disp, base, offset, scale)
-        else:
-            return "{}({},{})".format(disp, base, offset)
+    offset = INDIRECT_32BIT[(val & 0x38) >> 3]
+    base = SIB_BASE_REG[val & 7]
+    if scale > 1:
+        return "{}({},{},{})".format(disp, base, offset, scale)
+    elif offset:
+        return "{}({},{})".format(disp, base, offset)
     else:
-        if scale > 1:
-            return "({},{},{})".format(base, offset, scale)
-        else:
-            return "({},{})".format(base, offset)
+        return "{}({})".format(disp, base)
 
 def to_r16_32_reg(instr, val):
     if instr.data_mode == 32:
@@ -220,7 +216,7 @@ def mod00(instr, op2_code, data, idx):
         elif op2_code == 4:
             sib = data[idx]
             idx += 1
-            op2 = to_indirect_sib(instr, sib, None)
+            op2 = to_indirect_sib(instr, sib)
         else:
             op2 = to_indirect(instr, op2_code, None)
     instr.op2 = op2
@@ -230,10 +226,10 @@ def mod00(instr, op2_code, data, idx):
 def mod01(instr, op2_code, data, idx):
     # Do the Effective address element from the 16-bit / 32-bit
     # ModR/M Byte given mod val 01
-    if (instr.addr_mode == 32) and (op2_code == 5):
+    if (instr.addr_mode == 32) and (op2_code == 4):
         sib = data[idx]
         idx += 1
-        op2 = to_indirect_sib(instr, sib, None)
+        op2 = to_indirect_sib(instr, sib)
     else:
         # 8 bit displacement
         disp, idx = extract_8bit_disp(data, idx)
@@ -253,7 +249,7 @@ def mod10(instr, op2_code, data, idx):
         if op2_code == 4:
             sib = data[idx]
             idx += 1
-            op2 = to_indirect_sib(instr, sib, None)
+            op2 = to_indirect_sib(instr, sib)
         else:
             disp, idx = extract_32bit_disp(data, idx)
             op2 = to_indirect(instr, op2_code, disp)
