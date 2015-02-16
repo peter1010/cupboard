@@ -333,12 +333,45 @@ def modrm2reg16_32(instr, data, idx):
     instr.op1 = to_r16_32_reg(instr, (modrm & 0x38) >> 3)
     return idx
 
+def modrm2reg16_32_alt(instr, data, idx):
+    """Specific to the bound instruction"""
+    modrm = data[idx]
+    mod = modrm & 0xc0
+    op2_code = modrm & 7
+    idx += 1
+    if mod == 0x00:
+        idx = mod00(instr, op2_code, data, idx)
+    elif mod == 0x40:
+        idx = mod01(instr, op2_code, data, idx)
+    elif mod == 0x80:
+        idx = mod10(instr, op2_code, data, idx)
+    elif mod == 0xc0:
+        raise ValueError
+    instr.op1 = to_r16_32_reg(instr, (modrm & 0x38) >> 3)
+    return idx
+
+
 
 def rev_modrm2reg16_32(instr, data, idx):
     idx = modrm2reg16_32(instr, data, idx)
     instr.swap_operands()
     return idx
 
+def bound_operands(instr, data, idx):
+    """Specific to the bound instruction"""
+    if instr.mode == 64:
+        raise ValueError
+    idx = modrm2reg16_32_alt(instr, data, idx)
+    # Note no swap of op order, this case interl == at&t syntax!
+    return idx
+
+def arpl_operands(instr, data, idx):
+    if instr.mode == 64:
+        raise ValueError
+    instr.data_mode = 16
+    instr.addr_mode = 16
+    idx = modrm2reg16_32(instr, data, idx)
+    return idx
 
 def imm2al(instr, data, idx):
     disp, idx = extract_8bit_disp(data, idx)
@@ -391,6 +424,8 @@ def reg_al(instr, data, idx):
     return idx
 
 def append_w(instr, data, idx):
+    if instr.mode == 64:
+        raise ValueError
     if instr.data_mode == 16:
         instr.mnemonic = instr.mnemonic + "w"
     return idx
@@ -404,22 +439,28 @@ def reg_e_cx(instr, data, idx):
     return idx
 
 def reg_e_dx(instr, data, idx):
-    return to_r16_32_reg(instr, 2)
+    instr.op1 = to_r16_32_reg(instr, 2)
+    return idx
 
 def reg_e_bx(instr, data, idx):
-    return to_r16_32_reg(instr, 3)
+    instr.op1 = to_r16_32_reg(instr, 3)
+    return idx
 
 def reg_e_sp(instr, data, idx):
-    return to_r16_32_reg(instr, 4)
+    instr.op1 = to_r16_32_reg(instr, 4)
+    return idx
 
 def reg_e_bp(instr, data, idx):
-    return to_r16_32_reg(instr, 5)
+    instr.op1 = to_r16_32_reg(instr, 5)
+    return idx
 
 def reg_e_si(instr, data, idx):
-    return to_r16_32_reg(instr, 6)
+    instr.op1 = to_r16_32_reg(instr, 6)
+    return idx
 
 def reg_e_di(instr, data, idx):
-    return to_r16_32_reg(instr, 7)
+    instr.op1 = to_r16_32_reg(instr, 7)
+    return idx
 
 
 ONE_BYTE_OPCODES = (
@@ -528,20 +569,20 @@ ONE_BYTE_OPCODES = (
     # 0x60 - 0x6f
     ("pusha", append_w),
     ("popa", append_w),
-    ("bound",),
-    ("arpl",),
+    ("bound", bound_operands),
+    ("arpl", arpl_operands),
     None, # 0x64 - FS Override
     None, # 0x65 - GS Overide
     None, # 0x66 - Operand/Precision-size override
     None, # 0x67 - Address-size override
-    ("PUSH",),
-    ("IMUL",),
-    ("PUSH",),
-    ("IMUL",),
-    ("INS",),
-    ("INS",),
-    ("OUTS",),
-    ("OUTS",),
+    ("push",),
+    ("imul",),
+    ("push",),
+    ("imul",),
+    ("ins",),
+    ("ins",),
+    ("outs",),
+    ("outs",),
     # 0x70 - 0x7f
     ("JO",),
     ("JNO",),
@@ -577,7 +618,7 @@ ONE_BYTE_OPCODES = (
     ("MOV",),
     ("POP",),
     # 0x90 - 0x9f
-    (("XCHG","NOP", "PAUSE"),),
+    ("nop", None), # ("XCHG","NOP", "PAUSE"),),
     None, None, None, None, None, None, None,
     (("CBW","CWDE"),),
     (("CWD","CDQ"),),

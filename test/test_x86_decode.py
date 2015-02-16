@@ -222,78 +222,84 @@ class X86DecodeTest(unittest.TestCase):
         lines_of_code = [decode.decode(arch, data)[0] for data in lines_of_mcode]
         self.chk_disassembler2(arch, lines_of_code, lines_of_mcode)
 
+    def testOneByteCode(self):
+        arch = Arch()
+        lines_of_mcode = []
+        lines_of_code = []
+        for i in (
+            0x06, 0x07, 0x0E, 0x16, 0x17, 0x1e, 0x1f, 0x27, 0x2f,
+            0x37, 0x3F, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46,
+            0x47, 0x48, 0x49, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55,
+            0x56, 0x57, 0x58, 0x59, 0x90
+        ):
+            mcode = bytes([i,])
+            lines_of_mcode.append(mcode)
+            lines_of_code.append(decode.decode(arch, mcode)[0])
+        self.chk_disassembler2(arch, lines_of_code, lines_of_mcode)
+
+
     def test06toFF(self):
         arch = Arch()
         lines_of_mcode = [
-            b"\x06",
-            b"\x07",
             b"\x08\xf1",
             b"\x09\xf1",
             b"\x0A\xf1",
             b"\x0B\xf1",
             b"\x0C\xf1",
             b"\x0D\x01\x02\x03\x04",
-            b"\x0E",
             b"\x10\xf1",
             b"\x11\xf1",
             b"\x12\xf1",
             b"\x13\xf1",
             b"\x14\xf1",
             b"\x15\x01\x02\x03\x04",
-            b"\x16",
-            b"\x17",
             b"\x18\xf1",
             b"\x19\xf1",
             b"\x1A\xf1",
             b"\x1B\xf1",
             b"\x1C\xf1",
             b"\x1D\x01\x02\x03\x04",
-            b"\x1E",
-            b"\x1F",
             b"\x20\xf1",
             b"\x21\xf1",
             b"\x22\xf1",
             b"\x23\xf1",
             b"\x24\xf1",
             b"\x25\x01\x02\x03\x04",
-            b"\x27",
             b"\x28\xf1",
             b"\x29\xf1",
             b"\x2A\xf1",
             b"\x2B\xf1",
             b"\x2C\xf1",
             b"\x2D\x01\x02\x03\x04",
-            b"\x2F",
             b"\x30\xf1",
             b"\x31\xf1",
             b"\x32\xf1",
             b"\x33\xf1",
             b"\x34\xf1",
             b"\x35\x01\x02\x03\x04",
-            b"\x37",
             b"\x38\xf1",
             b"\x39\xf1",
             b"\x3A\xf1",
             b"\x3B\xf1",
             b"\x3C\xf1",
             b"\x3D\x01\x02\x03\x04",
-            b"\x3F",
-            b"\x40",
             b"\x66\x40",
             b"\x60",
             b"\x66\x60",
             b"\x61",
             b"\x66\x61",
+            b"\x62\x01",
+            b"\x63\x01",
         ]
         lines_of_code = [decode.decode(arch, data)[0] for data in lines_of_mcode]
         self.chk_disassembler(arch, lines_of_code, lines_of_mcode)
 
 
-
     @unittest.skip("")
     def test_fuzzy(self):
+        arch = Arch()
         for i in range(1000):
-            data = bytes([1] + [random.randint(0, 255) for i in range(16)])
+            data = bytes([random.randint(0, 255) for i in range(16)])
             try:
                 instruction, idx = decode.decode(Arch(), data)
             except ValueError:
@@ -305,7 +311,7 @@ class X86DecodeTest(unittest.TestCase):
             except IndexError:
                 continue
             print(instruction)
-            data2 = assemble(instruction)
+            data2 = assemble(arch, [instruction], [data])[0]
             if data[:idx] != data2:
                 instruction2, idx = decode.decode(Arch(), data2)
                 self.assertEqual(instruction2, instruction)
