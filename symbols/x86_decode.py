@@ -175,13 +175,13 @@ def to_indirect_sib(instr, val, data, idx):
     if base is None:
         base = ""
         if scale == 2:
-            disp, idx = extract_8bit_disp(data, idx)
+            disp, idx = extract_8bit_value(data, idx)
             base = "%ebp"
         elif scale == 4:
-            disp, idx = extract_32bit_disp(data, idx)
+            disp, idx = extract_32bit_value(data, idx)
             base = "%ebp"
         else:
-            disp, idx = extract_32bit_disp(data, idx)
+            disp, idx = extract_32bit_value(data, idx)
     else:
         disp = ""
     if offset:
@@ -215,21 +215,21 @@ def to_xmm_reg(val):
     return "XMM{}".format(val)
 
 
-def extract_32bit_disp(data, idx):
+def extract_32bit_value(data, idx):
     disp = data[idx] + (data[idx+1] << 8) + (data[idx+2] << 16) + (data[idx+3] << 24)
     if disp > 0x7fffffff: # Word is signed!
         disp = disp - 0x100000000
     return disp, idx + 4
 
 
-def extract_16bit_disp(data, idx):
+def extract_16bit_value(data, idx):
     disp = data[idx] + (data[idx+1] << 8)
     if disp > 0x7fff: # Word is signed!
         disp = disp - 0x10000
     return disp, idx + 2
 
 
-def extract_8bit_disp(data, idx):
+def extract_8bit_value(data, idx):
     disp = data[idx]
     if disp > 0x7f:   # Byte is signed!
         disp = disp - 0x100
@@ -241,13 +241,13 @@ def mod00(instr, op2_code, data, idx):
     # ModR/M Byte given mod val 0
     if instr.addr_mode == 16:
         if op2_code == 6:
-            disp, idx = extract_16bit_disp(data, idx)
+            disp, idx = extract_16bit_value(data, idx)
             op2 = "({})".format(disp)
         else:
             op2 = to_indirect(instr, op2_code, "")
     elif instr.addr_mode == 32:
         if op2_code == 5:
-            disp, idx = extract_32bit_disp(data, idx)
+            disp, idx = extract_32bit_value(data, idx)
             op2 = "({})".format(disp)
         elif op2_code == 4:
             sib = data[idx]
@@ -268,7 +268,7 @@ def mod01(instr, op2_code, data, idx):
         op2, idx = to_indirect_sib(instr, sib, data, idx)
     else:
         # 8 bit displacement
-        disp, idx = extract_8bit_disp(data, idx)
+        disp, idx = extract_8bit_value(data, idx)
         op2 = to_indirect(instr, op2_code, disp)
     instr.op2 = op2
     return idx
@@ -279,7 +279,7 @@ def mod10(instr, op2_code, data, idx):
     # ModR/M Byte given mod val 10
     if instr.addr_mode == 16:
         # 16 bit displacement
-        disp, idx = extract_16bit_disp(data, idx)
+        disp, idx = extract_16bit_value(data, idx)
         op2 = to_indirect(instr, op2_code, disp)
     elif instr.addr_mode == 32:
         if op2_code == 4:
@@ -287,7 +287,7 @@ def mod10(instr, op2_code, data, idx):
             idx += 1
             op2, idx = to_indirect_sib(instr, sib, data, idx)
         else:
-            disp, idx = extract_32bit_disp(data, idx)
+            disp, idx = extract_32bit_value(data, idx)
             op2 = to_indirect(instr, op2_code, disp)
     instr.op2 = op2
     return idx
@@ -374,7 +374,7 @@ def arpl_operands(instr, data, idx):
     return idx
 
 def imm2al(instr, data, idx):
-    disp, idx = extract_8bit_disp(data, idx)
+    disp, idx = extract_8bit_value(data, idx)
     instr.op1 = "${}".format(disp)
     instr.op2 = "%al"
     return idx
@@ -382,12 +382,41 @@ def imm2al(instr, data, idx):
 
 def imm2ax(instr, data, idx):
     if instr.data_mode == 32:
-        disp, idx = extract_32bit_disp(data, idx)
+        disp, idx = extract_32bit_value(data, idx)
         instr.op2 = "%eax"
     else:
-        disp, idx = extract_16bit_disp(data, idx)
+        disp, idx = extract_16bit_value(data, idx)
         instr.op2 = "%ax"
     instr.op1 = "${}".format(disp)
+    return idx
+
+def imm16_32(instr, data, idx):
+    if instr.data_mode == 32:
+        value, idx = extract_32bit_value(data, idx)
+    else:
+        value, idx = extract_16bit_value(data, idx)
+    instr.op1 = "${}".format(disp)
+    return idx
+
+def imm8(instr, data, idx):
+    value, idx = extract_8bit_value(data, idx)
+    instr.op1 = "${}".format(disp)
+    return idx
+
+
+def rev_modrm2reg16_32_imm16_32(instr, data, idx):
+    idx = rev_modrm2reg16_32(instr, data, idx)
+    if instr.data_mode == 32:
+        value, idx = extract_32bit_value(data, idx)
+    else:
+        value, idx = extract_16bit_value(data, idx)
+    instr.op3 = "${}".format(value)
+    return idx
+
+def rev_modrm2reg16_32_imm8(instr, data, idx):
+    idx = rev_modrm2reg16_32(instr, data, idx)
+    value, idx = extract_8bit_value(data, idx)
+    instr.op3 = "${}".format(value)
     return idx
 
 
@@ -429,6 +458,14 @@ def append_w(instr, data, idx):
     if instr.data_mode == 16:
         instr.mnemonic = instr.mnemonic + "w"
     return idx
+
+def append_w_or_d(instr, data, idx):
+    if instr.data_mode == 16:
+        instr.mnemonic = instr.mnemonic + "w"
+    else:
+        instr.mnemonic = instr.mnemonic + "d"
+    return idx
+
 
 def reg_e_ax(instr, data, idx):
     instr.op1 = to_r16_32_reg(instr, 0)
@@ -575,46 +612,46 @@ ONE_BYTE_OPCODES = (
     None, # 0x65 - GS Overide
     None, # 0x66 - Operand/Precision-size override
     None, # 0x67 - Address-size override
-    ("push",),
-    ("imul",),
-    ("push",),
-    ("imul",),
-    ("ins",),
-    ("ins",),
-    ("outs",),
-    ("outs",),
+    ("push", imm16_32),
+    ("imul", rev_modrm2reg16_32_imm16_32),
+    ("push", imm8),
+    ("imul", rev_modrm2reg16_32_imm8),
+    ("insb", None),
+    ("ins", append_w_or_d),
+    ("outsb", None),
+    ("outs", append_w_or_d),
     # 0x70 - 0x7f
-    ("JO",),
-    ("JNO",),
-    ("JB",),
-    ("JNB",),
-    ("JZ",),
-    ("JNZ",),
-    ("JBE",),
-    ("JNBE",),
-    ("JS",),
-    ("JNS",),
-    ("JP",),
-    ("JNP",),
-    ("JL",),
-    ("JNL",),
-    ("JLE",),
-    ("JNLE",),
+    ("jo",),
+    ("jno",),
+    ("jb",),
+    ("jnb",),
+    ("jz",),
+    ("jnz",),
+    ("jbe",),
+    ("jnbe",),
+    ("js",),
+    ("jns",),
+    ("jp",),
+    ("jnp",),
+    ("jl",),
+    ("jnl",),
+    ("jle",),
+    ("jnle",),
     # 0x80 - 0x8f
-    (("ADD","OR","ADC","SBB","AND","SUB","XOR","CMP"),),
-    (("ADD","OR","ADC","SBB","AND","SUB","XOR","CMP"),),
-    (("ADD","OR","ADC","SBB","AND","SUB","XOR","CMP"),),
-    (("ADD","OR","ADC","SBB","AND","SUB","XOR","CMP"),),
-    ("TEST",),
-    ("TEST",),
-    ("XCHG",),
-    ("XCHG",),
-    ("MOV",),
-    ("MOV",),
-    ("MOV",),
-    ("MOV",),
-    ("MOV",),
-    ("LEA",),
+    (("add","or","adc","sbb","and","sub","xor","cmp"),),
+    (("add","or","adc","sbb","and","sub","xor","cmp"),),
+    (("add","or","adc","sbb","and","sub","xor","cmp"),),
+    (("add","or","adc","sbb","and","sub","xor","cmp"),),
+    ("test",),
+    ("test",),
+    ("xchg",),
+    ("xchg",),
+    ("mov",),
+    ("mov",),
+    ("mov",),
+    ("mov",),
+    ("mov",),
+    ("lea",),
     ("MOV",),
     ("POP",),
     # 0x90 - 0x9f

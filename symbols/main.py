@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 from . import parse_elf
+from . import browser
 
 class Application:
 
@@ -16,12 +17,9 @@ class Application:
         self.root = root
         self.main = tk.PanedWindow(root,showhandle=True)
         self.main.pack(fill=tk.BOTH, expand=1)
-        frame1 = tk.Frame(root)
-        title = tk.Label(frame1, text="Browser")
-        title.pack(side=tk.TOP)
-
+        frame1 = browser.Browser(self.main)
         frame2 = ttk.Notebook(root)
-        self.main.add(frame1)
+        self.main.add(frame1.frame)
         self.main.add(frame2)
 
     def create_menu(self, root):
