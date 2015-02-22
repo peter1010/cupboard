@@ -25,10 +25,14 @@ class Application:
     def create_menu(self, root):
         menubar = tk.Menu(root)
         filemenu = tk.Menu(menubar, tearoff=0)
+        filemenu.add_command(label="Create project", command=self.create_project)
         filemenu.add_command(label="Load file", command=self.load_file)
         filemenu.add_command(label="Quit", command=self.quit)
         menubar.add_cascade(label="File", menu=filemenu)
         root.config(menu=menubar)
+
+    def create_project(self):
+        pass
 
     def load_file(self):
         """Offer the User ability to load a file"""
